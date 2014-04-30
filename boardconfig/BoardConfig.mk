@@ -226,6 +226,33 @@ else ifeq ($(TARGET_PRODUCT), cm_skyrocket)
     BRIGHTNESS_SYS_FILE := "/sys/class/leds/lcd-backlight/brightness"
     BOARD_USE_FB2PNG := true
     BOARD_USE_B_SLOT_PROTOCOL := true
+    
+    
+#Galaxy S2HD e120l - dalilgt
+else ifeq ($(TARGET_PRODUCT), cm_dalilgt)
+    TARGET_COMMON_NAME := dalilgt e120l
+    BOOTLOADER_CMD_ARG := "download"
+    KERNEL_EXFAT_MODULE_NAME := "exfat"
+    KERNEL_NTFS_MODULE_NAME := "ntfs"
+    TARGET_SCREEN_HEIGHT := 1280
+    TARGET_SCREEN_WIDTH := 720
+    BOARD_HAS_LOW_RESOLUTION := true
+    BRIGHTNESS_SYS_FILE := "/sys/class/leds/lcd-backlight/brightness"
+    BOARD_USE_FB2PNG := true
+    BOARD_USE_B_SLOT_PROTOCOL := true
+    
+#Galaxy S2HD e120S - daliskt
+else ifeq ($(TARGET_PRODUCT), cm_daliskt)
+    TARGET_COMMON_NAME := daliskt e120s
+    BOOTLOADER_CMD_ARG := "download"
+    KERNEL_EXFAT_MODULE_NAME := "exfat"
+    KERNEL_NTFS_MODULE_NAME := "ntfs"
+    TARGET_SCREEN_HEIGHT := 1280
+    TARGET_SCREEN_WIDTH := 720
+    BOARD_HAS_LOW_RESOLUTION := true
+    BRIGHTNESS_SYS_FILE := "/sys/class/leds/lcd-backlight/brightness"
+    BOARD_USE_FB2PNG := true
+    BOARD_USE_B_SLOT_PROTOCOL := true
 
 #Galaxy S3 International - i9300 - i9305
 else ifneq ($(filter $(TARGET_PRODUCT),cm_i9300 cm_i9305),)
