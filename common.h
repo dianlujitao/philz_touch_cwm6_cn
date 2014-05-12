@@ -20,6 +20,14 @@
 #include <stdio.h>
 #include <fs_mgr.h>
 
+#ifndef PHILZ_TOUCH_RECOVERY
+//#define MENU_TEXT_COLOR 255, 160, 49, 255
+#define MENU_TEXT_COLOR 0, 191, 255, 255
+#define NORMAL_TEXT_COLOR 200, 200, 200, 255
+#define HEADER_TEXT_COLOR NORMAL_TEXT_COLOR
+#endif
+#define MENU_TEXT_COLOR_RED 255, 0, 0, 255
+
 // Initialize the graphics system.
 void ui_init();
 
@@ -46,6 +54,7 @@ void ui_set_nice(int enabled);
 int ui_was_niced();
 int ui_get_text_cols();
 void ui_increment_frame();
+void ui_setMenuTextColor(int r, int g, int b, int a);
 
 void ui_nolog_lines(int lines);
 
@@ -67,8 +76,10 @@ int ui_menu_select(int sel);
 // statements will be displayed.
 void ui_end_menu();
 
-int ui_get_showing_back_button();
+int ui_get_selected_item();
+
 void ui_set_showing_back_button(int showBackButton);
+int ui_is_showing_back_button();
 
 void ui_set_log_stdout(int enabled);
 int ui_should_log_stdout();
@@ -153,9 +164,6 @@ typedef struct {
 
 // fopen a file, mounting volumes and making parent dirs as necessary.
 FILE* fopen_path(const char *path, const char *mode);
-
-int ui_get_selected_item();
-int ui_is_showing_back_button();
 
 void set_perf_mode(int on);
 

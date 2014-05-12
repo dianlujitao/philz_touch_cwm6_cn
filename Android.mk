@@ -1,16 +1,26 @@
-ifneq ($(WITH_SIMPLE_RECOVERY),true)
-
 LOCAL_PATH := $(call my-dir)
+
+ifeq ($(RECOVERY_VARIANT),)
+ifeq ($(LOCAL_PATH),bootable/recovery)
+RECOVERY_VARIANT := cwm
+endif
+endif
+
+ifeq ($(RECOVERY_VARIANT),cwm)
 
 # philz touch gui: either prebuilt or from sources
 PHILZ_TOUCH_RECOVERY := true
-USE_PREBUILT_LIBTOUCH_GUI := true
+# USE_PREBUILT_LIBTOUCH_GUI := true
 
 ifdef PHILZ_TOUCH_RECOVERY
 ifdef USE_PREBUILT_LIBTOUCH_GUI
 include $(CLEAR_VARS)
 MY_LOCAL_PATH := $(LOCAL_PATH)
-LOCAL_PREBUILT_LIBS := libtouch_gui/libtouch_gui.a
+ifeq ($(TARGET_CPU_VARIANT),arm11)
+    LOCAL_PREBUILT_LIBS := libtouch_gui/armv6/libtouch_gui.a
+else
+    LOCAL_PREBUILT_LIBS := libtouch_gui/libtouch_gui.a
+endif
 include $(BUILD_MULTI_PREBUILT)
 LOCAL_PATH := $(MY_LOCAL_PATH)
 endif
@@ -40,6 +50,7 @@ LOCAL_SRC_FILES := \
     mounts.c \
     extendedcommands.c \
     advanced_functions.c \
+    digest/md5.c \
     recovery_settings.c \
     nandroid.c \
     reboot.c \
@@ -48,15 +59,13 @@ LOCAL_SRC_FILES := \
     firmware.c \
     edifyscripting.c \
     prop.c \
-    default_recovery_ui.c \
     adb_install.c \
     verifier.c \
-    ../../system/vold/vdc.c
+    ../../system/vold/vdc.c \
+    propsrvc/legacy_property_service.c
 
 ADDITIONAL_RECOVERY_FILES := $(shell echo $$ADDITIONAL_RECOVERY_FILES)
 LOCAL_SRC_FILES += $(ADDITIONAL_RECOVERY_FILES)
-
-LOCAL_ADDITIONAL_DEPENDENCIES += updater.fallback
 
 LOCAL_MODULE := recovery
 
@@ -73,10 +82,12 @@ RECOVERY_NAME := CWM-based Recovery
 endif
 endif
 
-PHILZ_BUILD := 6.18.7
-CWM_BASE_VERSION := v6.0.4.7
+# This should be the same line as upstream to not break makerecoveries.sh
+RECOVERY_VERSION := $(RECOVERY_NAME) v6.0.4.8
+
+PHILZ_BUILD := 6.41.5
+CWM_BASE_VERSION := $(shell echo $(RECOVERY_VERSION) | cut -d ' ' -f 3)
 LOCAL_CFLAGS += -DCWM_BASE_VERSION="$(CWM_BASE_VERSION)"
-RECOVERY_VERSION := $(RECOVERY_NAME) $(CWM_BASE_VERSION)
 
 LOCAL_CFLAGS += -DRECOVERY_VERSION="$(RECOVERY_VERSION)"
 RECOVERY_API_VERSION := 2
@@ -126,9 +137,9 @@ BOARD_RECOVERY_CHAR_HEIGHT := $(shell echo $(BOARD_USE_CUSTOM_RECOVERY_FONT) | c
 
 LOCAL_CFLAGS += -DBOARD_RECOVERY_CHAR_WIDTH=$(BOARD_RECOVERY_CHAR_WIDTH) -DBOARD_RECOVERY_CHAR_HEIGHT=$(BOARD_RECOVERY_CHAR_HEIGHT)
 
-BOARD_RECOVERY_DEFINES := BOARD_RECOVERY_SWIPE BOARD_HAS_NO_SELECT_BUTTON BOARD_UMS_LUNFILE BOARD_RECOVERY_ALWAYS_WIPES BOARD_RECOVERY_HANDLES_MOUNT BOARD_TOUCH_RECOVERY RECOVERY_EXTEND_NANDROID_MENU TARGET_USE_CUSTOM_LUN_FILE_PATH TARGET_DEVICE TARGET_RECOVERY_FSTAB
-BOARD_RECOVERY_DEFINES += BOOTLOADER_CMD_ARG BOARD_HAS_SLOW_STORAGE RECOVERY_NEED_SELINUX_FIX BOARD_USE_MTK_LAYOUT BOARD_MTK_BOOT_LABEL EXTRA_PARTITIONS_PATH
-BOARD_RECOVERY_DEFINES += BRIGHTNESS_SYS_FILE BATTERY_LEVEL_PATH BOARD_POST_UNBLANK_COMMAND BOARD_HAS_LOW_RESOLUTION RECOVERY_TOUCHSCREEN_SWAP_XY RECOVERY_TOUCHSCREEN_FLIP_X RECOVERY_TOUCHSCREEN_FLIP_Y BOARD_USE_B_SLOT_PROTOCOL BOARD_USE_FB2PNG
+BOARD_RECOVERY_DEFINES := BOARD_RECOVERY_SWIPE BOARD_HAS_NO_SELECT_BUTTON BOARD_UMS_LUNFILE BOARD_RECOVERY_ALWAYS_WIPES BOARD_RECOVERY_HANDLES_MOUNT BOARD_TOUCH_RECOVERY RECOVERY_EXTEND_NANDROID_MENU TARGET_USE_CUSTOM_LUN_FILE_PATH TARGET_DEVICE TARGET_RECOVERY_FSTAB BOARD_NATIVE_DUALBOOT BOARD_NATIVE_DUALBOOT_SINGLEDATA BOARD_RECOVERY_SWIPE_SWAPXY
+BOARD_RECOVERY_DEFINES += BOOTLOADER_CMD_ARG BOARD_HAS_SLOW_STORAGE BOARD_USE_MTK_LAYOUT BOARD_MTK_BOOT_LABEL EXTRA_PARTITIONS_PATH BOARD_RECOVERY_USE_BBTAR
+BOARD_RECOVERY_DEFINES += BRIGHTNESS_SYS_FILE BATTERY_LEVEL_PATH BOARD_POST_UNBLANK_COMMAND BOARD_HAS_LOW_RESOLUTION RECOVERY_TOUCHSCREEN_SWAP_XY RECOVERY_TOUCHSCREEN_FLIP_X RECOVERY_TOUCHSCREEN_FLIP_Y BOARD_USE_B_SLOT_PROTOCOL BOARD_HAS_NO_FB2PNG
 
 # Stringify BOARD_RECOVERY_DEFINES list
 $(foreach board_define,$(BOARD_RECOVERY_DEFINES), \
@@ -147,7 +158,8 @@ LOCAL_STATIC_LIBRARIES += libext4_utils_static libz libsparse_static
 
 ifeq ($(ENABLE_LOKI_RECOVERY),true)
   LOCAL_CFLAGS += -DENABLE_LOKI
-  LOCAL_STATIC_LIBRARIES += libloki_recovery
+  LOCAL_STATIC_LIBRARIES += libloki_static
+  LOCAL_SRC_FILES += loki/loki_recovery.c
 endif
 
 # This binary is in the recovery ramdisk, which is otherwise a copy of root.
@@ -163,8 +175,18 @@ else
   LOCAL_SRC_FILES += $(BOARD_CUSTOM_RECOVERY_KEYMAPPING)
 endif
 
+ifeq ($(BOARD_CUSTOM_RECOVERY_UI),)
+  LOCAL_SRC_FILES += default_recovery_ui.c
+else
+  LOCAL_SRC_FILES += $(BOARD_CUSTOM_RECOVERY_UI)
+endif
+
 LOCAL_STATIC_LIBRARIES += libvoldclient libsdcard libminipigz libfsck_msdos
 LOCAL_STATIC_LIBRARIES += libmake_ext4fs libext4_utils_static libz libsparse_static
+
+ifneq ($(BOARD_RECOVERY_USE_BBTAR),true)
+LOCAL_STATIC_LIBRARIES += libtar_recovery
+endif
 
 ifeq ($(TARGET_USERIMAGES_USE_F2FS), true)
 LOCAL_CFLAGS += -DUSE_F2FS
@@ -195,6 +217,10 @@ include $(BUILD_EXECUTABLE)
 
 RECOVERY_LINKS := bu make_ext4fs edify busybox flash_image dump_image mkyaffs2image unyaffs erase_image nandroid reboot volume setprop getprop start stop dedupe minizip setup_adbd fsck_msdos newfs_msdos vdc sdcard pigz
 
+ifneq ($(BOARD_RECOVERY_USE_BBTAR),true)
+RECOVERY_LINKS += tar
+endif
+
 ifeq ($(TARGET_USERIMAGES_USE_F2FS), true)
 RECOVERY_LINKS += mkfs.f2fs fsck.f2fs fibmap.f2fs
 endif
@@ -213,6 +239,9 @@ ALL_DEFAULT_INSTALLED_MODULES += $(RECOVERY_SYMLINKS)
 # Now let's do recovery symlinks
 BUSYBOX_LINKS := $(shell cat external/busybox/busybox-minimal.links)
 exclude := tune2fs mke2fs
+ifneq ($(BOARD_RECOVERY_USE_BBTAR),true)
+exclude += tar
+endif
 RECOVERY_BUSYBOX_SYMLINKS := $(addprefix $(TARGET_RECOVERY_ROOT_OUT)/sbin/,$(filter-out $(exclude),$(notdir $(BUSYBOX_LINKS))))
 $(RECOVERY_BUSYBOX_SYMLINKS): BUSYBOX_BINARY := busybox
 $(RECOVERY_BUSYBOX_SYMLINKS): $(LOCAL_INSTALLED_MODULE)
@@ -222,14 +251,6 @@ $(RECOVERY_BUSYBOX_SYMLINKS): $(LOCAL_INSTALLED_MODULE)
 	$(hide) ln -sf $(BUSYBOX_BINARY) $@
 
 ALL_DEFAULT_INSTALLED_MODULES += $(RECOVERY_BUSYBOX_SYMLINKS) 
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := nandroid-md5.sh
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_CLASS := RECOVERY_EXECUTABLES
-LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/sbin
-LOCAL_SRC_FILES := nandroid-md5.sh
-include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := killrecovery.sh
@@ -299,12 +320,16 @@ include $(commands_recovery_local_path)/libtouch_gui/Android.mk
 endif
 endif
 
-ifneq ($(BOARD_USE_FB2PNG),)
+ifneq ($(BOARD_HAS_NO_FB2PNG),true)
     include $(commands_recovery_local_path)/fb2png/Android.mk
 endif
 
 ifneq ($(BOARD_USE_NTFS_3G),false)
     include $(commands_recovery_local_path)/ntfs-3g/Android.mk
+endif
+
+ifneq ($(BOARD_RECOVERY_USE_BBTAR),true)
+    include $(commands_recovery_local_path)/libtar/Android.mk
 endif
 
 ifeq ($(NO_AROMA_FILE_MANAGER),)

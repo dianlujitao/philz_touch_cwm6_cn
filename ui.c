@@ -232,7 +232,7 @@ static void draw_progress_locked()
 }
 
 #ifndef PHILZ_TOUCH_RECOVERY
-void draw_text_line(int row, const char* t) {
+static void draw_text_line(int row, const char* t) {
   if (t[0] != '\0') {
 #ifdef NOT_ENOUGH_RAINBOWS
     if (ui_get_rainbow_mode()) ui_rainbow_mode();
@@ -241,12 +241,18 @@ void draw_text_line(int row, const char* t) {
   }
 }
 
-//#define MENU_TEXT_COLOR 255, 160, 49, 255
-#define MENU_TEXT_COLOR 0, 191, 255, 255
-#define NORMAL_TEXT_COLOR 200, 200, 200, 255
-#define HEADER_TEXT_COLOR NORMAL_TEXT_COLOR
-
 #endif
+
+// we keep these even in PHILZ_TOUCH_RECOVERY to not break compiling
+// they have no effect in PhilZ Touch builds
+// only used for native dual boot devices
+static int menuTextColor[4] = {0, 191, 255, 255};
+void ui_setMenuTextColor(int r, int g, int b, int a) {
+    menuTextColor[0] = r;
+    menuTextColor[1] = g;
+    menuTextColor[2] = b;
+    menuTextColor[3] = a;
+}
 
 // Redraw everything on the screen.  Does not flip pages.
 // Should only be called with gUpdateMutex locked.
@@ -267,10 +273,10 @@ void draw_screen_locked(void)
         int total_rows = gr_fb_height() / CHAR_HEIGHT;
         int i = 0;
         int j = 0;
-        int row = 0; // current row that we are drawing on
+        int row = 0;            // current row that we are drawing on
         if (show_menu) {
 #ifndef BOARD_TOUCH_RECOVERY
-            gr_color(MENU_TEXT_COLOR);
+            gr_color(menuTextColor[0], menuTextColor[1], menuTextColor[2], menuTextColor[3]);
             gr_fill(0, (menu_top + menu_sel - menu_show_start) * CHAR_HEIGHT,
                     gr_fb_width(), (menu_top + menu_sel - menu_show_start + 1)*CHAR_HEIGHT+1);
 
@@ -285,14 +291,14 @@ void draw_screen_locked(void)
             else
                 j = menu_items - menu_show_start;
 
-            gr_color(MENU_TEXT_COLOR);
+            gr_color(menuTextColor[0], menuTextColor[1], menuTextColor[2], menuTextColor[3]);
             for (i = menu_show_start + menu_top; i < (menu_show_start + menu_top + j); ++i) {
                 if (i == menu_top + menu_sel) {
                     gr_color(255, 255, 255, 255);
                     draw_text_line(i - menu_show_start , menu[i]);
-                    gr_color(MENU_TEXT_COLOR);
+                    gr_color(menuTextColor[0], menuTextColor[1], menuTextColor[2], menuTextColor[3]);
                 } else {
-                    gr_color(MENU_TEXT_COLOR);
+                    gr_color(menuTextColor[0], menuTextColor[1], menuTextColor[2], menuTextColor[3]);
                     draw_text_line(i - menu_show_start, menu[i]);
                 }
                 row++;
@@ -476,14 +482,6 @@ static int input_callback(int fd, short revents, void *data)
     }
     pthread_mutex_unlock(&key_queue_mutex);
 
-    if (ev.value > 0 && device_toggle_display(key_pressed, ev.code)) {
-        pthread_mutex_lock(&gUpdateMutex);
-        show_text = !show_text;
-        if (show_text) show_text_ever = 1;
-        update_screen_locked();
-        pthread_mutex_unlock(&gUpdateMutex);
-    }
-
     if (ev.value > 0 && device_reboot_now(key_pressed, ev.code)) {
         reboot_main_system(ANDROID_RB_RESTART, 0, 0);
     }
@@ -571,6 +569,7 @@ void ui_init(void)
         gInstallationOverlay = NULL;
     }
 #ifndef PHILZ_TOUCH_RECOVERY
+    // we manage this in touch_init()
     char enable_key_repeat[PROPERTY_VALUE_MAX];
     property_get("ro.cwm.enable_key_repeat", enable_key_repeat, "");
     if (!strcmp(enable_key_repeat, "true") || !strcmp(enable_key_repeat, "1")) {
@@ -596,6 +595,11 @@ void ui_init(void)
     pthread_t t;
     pthread_create(&t, NULL, progress_thread, NULL);
     pthread_create(&t, NULL, input_thread, NULL);
+    //prints custom text at bottom of recovery interface on start
+    //useless here if we use fast_ui_init() in default_recovery_ui.c: will be wiped
+    //Better ui_print foot notes in recovery.c in that case
+    //ui_prints are added in recovery.c under device_recovery_start()
+    //ui_print("Clockworkmod 6.0.1.5\n");
 }
 
 char *ui_copy_image(int icon, int *width, int *height, int *bpp) {
@@ -618,6 +622,7 @@ char *ui_copy_image(int icon, int *width, int *height, int *bpp) {
 void ui_set_background(int icon)
 {
 #ifdef PHILZ_TOUCH_RECOVERY
+    // call before locking gUpdateMutex as we need a ui_print in ui_friendly_log()
     ui_friendly_log(1);
 #endif
     pthread_mutex_lock(&gUpdateMutex);
@@ -724,6 +729,7 @@ void ui_print(const char *fmt, ...)
         char buf3[256] = "";
 
         // copy the buffer to modify it
+        // check for new lines until we find the line to exclude from writing to recovery.log file
         strcpy(buf2, buf);
         char *ptr = strtok(buf2, "\n");
         int i = 0;
@@ -731,7 +737,7 @@ void ui_print(const char *fmt, ...)
             // parse the buffer and exclude the line we do not want to write to recovery.log file
             if (i != no_stdout_line) {
                 strcpy(str, ptr);
-                // log only nandroid non empty lines
+                // log only nandroid non empty lines (empty lines are turned into spaces by nandroid_callback()
                 if (strcmp(str, " ") != 0) {
                     strcat(str, "\n");
                     strcat(buf3, str);
@@ -745,6 +751,7 @@ void ui_print(const char *fmt, ...)
     else if (ui_log_stdout)
         fputs(buf, stdout);
 
+    // now, we write log to screen
     // if we are running 'ui nice' mode, we do not want to force a screen update
     // for this line if not necessary.
     ui_niced = 0;
@@ -809,21 +816,27 @@ void ui_printlogtail(int nb_lines) {
         }
         fclose(f);
     }
+#ifndef PHILZ_TOUCH_RECOVERY
+    ui_print("Return to menu with any key.\n");
+#endif
     ui_log_stdout=1;
 }
 
 int ui_start_menu(const char** headers, char** items, int initial_selection) {
 #ifdef PHILZ_TOUCH_RECOVERY
+    // call before locking gUpdateMutex as we need a ui_print in ui_friendly_log()
     ui_friendly_log(0);
 #endif
     int i;
     pthread_mutex_lock(&gUpdateMutex);
     if (text_rows > 0 && text_cols > 0) {
         for (i = 0; i < text_rows; ++i) {
+            // populate top header array (menu title, clock, battery)
             if (headers[i] == NULL) break;
 
             int offset = 1;
 #ifdef PHILZ_TOUCH_RECOVERY
+            // do not let header text overlap on battery and clock top display
             if (i == 0)
                 offset = ui_menu_header_offset();
 #endif
@@ -835,6 +848,7 @@ int ui_start_menu(const char** headers, char** items, int initial_selection) {
 #endif
         }
 
+        // populate menu items
         menu_top = i;
         for (; i < MENU_MAX_ROWS; ++i) {
             if (items[i-menu_top] == NULL) break;
@@ -963,6 +977,7 @@ static int usb_connected() {
     return connected;
 }
 
+// assigns -2 code to key queue which triggers GO_BACK in get_menu_selection()
 void ui_cancel_wait_key() {
     pthread_mutex_lock(&key_queue_mutex);
     key_queue[key_queue_len] = -2;
@@ -1000,6 +1015,7 @@ int ui_wait_key()
                 return REFRESH;
             }
         }
+        // reboot timer (timeouts) decrement must be same as timeout.tv_sec += increase value or we get out of time sync
         timeouts -= REFRESH_TIME_USB_INTERVAL;
 #ifdef PHILZ_TOUCH_RECOVERY
         ui_refresh_display_state(&display_state);
@@ -1057,19 +1073,27 @@ int ui_wait_key_with_repeat()
                     return REFRESH;
                 }
             }
+            // reboot timer (timeouts) decrement must be same as timeout.tv_sec += increase value or we get out of time sync
             timeouts -= REFRESH_TIME_USB_INTERVAL;
 #ifdef PHILZ_TOUCH_RECOVERY
             ui_refresh_display_state(&display_state);
 #endif
         }
 #ifdef PHILZ_TOUCH_RECOVERY
+        // either a key was pressed (key_queue_len > 0) or reboot timer (timeouts) is reached
+        // wake up screen if it was blanked or dimmed but only if no key was pressed (key_queue_len == 0)
+        // this will avoid wake up screen after reboot timer reached AND USB cable is connected (no reboot) and screen was blanked/dimmed
         ui_refresh_display_state(&display_state);
 #endif
         pthread_mutex_unlock(&key_queue_mutex);
+
+        // either reboot timer is reached or a key was pressed
+        // if reboot timer was reached (key_queue_len == 0) AND no USB cable connected, reboot by returning -1
         if (rc == ETIMEDOUT && !usb_connected()) {
             return -1;
         }
 
+        // either a key was pressed (key_queue_len > 0) or reboot timer is reached AND USB cable is connected (key_queue_len == 0)
         // Loop to wait wait for more keys, or repeated keys to be ready.
         while (1) {
             unsigned long now_msec;
@@ -1157,10 +1181,6 @@ void ui_set_showing_back_button(int showBackButton) {
     gShowBackButton = showBackButton;
 }
 
-int ui_get_showing_back_button() {
-    return gShowBackButton;
-}
-
 int ui_is_showing_back_button() {
     return gShowBackButton && !ui_root_menu;
 }
@@ -1177,6 +1197,9 @@ int ui_handle_key(int key, int visible) {
 #endif
 }
 
+// called by nandroid_callback()
+// it will delete num first lines from the log in memory
+// that way, on next ui_print, they do not appear. This avoids screen to scroll during nandroid progress
 void ui_delete_line(int num) {
     pthread_mutex_lock(&gUpdateMutex);
     int i;

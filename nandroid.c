@@ -44,16 +44,22 @@
 #include "flashutils/flashutils.h"
 #include <libgen.h>
 
-#ifdef RECOVERY_NEED_SELINUX_FIX
-#include <selinux/selinux.h>
-#include <selinux/label.h>
-#include <selinux/android.h>
-#endif
-
 #ifdef PHILZ_TOUCH_RECOVERY
 #include "libtouch_gui/nandroid_gui.h"
 #include "libtouch_gui/gui_settings.h"
 #endif
+
+#ifdef BOARD_RECOVERY_USE_BBTAR
+#include <selinux/selinux.h>
+#include <selinux/label.h>
+#include <selinux/android.h>
+
+int bakupcon_to_file(const char *pathname, const char *filename);
+int restorecon(const char *pathname, const struct stat *sb);
+int restorecon_from_file(const char *filename);
+int restorecon_recursive(const char *pathname, const char *exclude);
+#endif
+
 
 // time in msec when nandroid job starts: used for dim timeout and total backup time
 static long long nandroid_start_msec = 0;
@@ -91,9 +97,9 @@ static int nandroid_files_count = 0;
 static void nandroid_callback(const char* filename) {
     if (filename == NULL)
         return;
-    const char* justfile = basename(filename);
+
     char tmp[PATH_MAX];
-    strcpy(tmp, justfile);
+    sprintf(tmp, "%s", BaseName(filename));
     if (tmp[strlen(tmp) - 1] == '\n')
         tmp[strlen(tmp) - 1] = '\0';
     tmp[ui_get_text_cols() - 1] = '\0';
@@ -103,15 +109,18 @@ static void nandroid_callback(const char* filename) {
 
     char size_progress[256] = "Size progress: N/A";
     if (show_nandroid_size_progress.value && Backup_Size != 0) {
+        // Backup_Size == 0 if if we couldn't stat backup size
         sprintf(size_progress, "Done %llu/%lluMb - Free %lluMb",
                 (Used_Size - Before_Used_Size) / 1048576LLU, Backup_Size / 1048576LLU, Free_Size / 1048576LLU);
     }
     size_progress[ui_get_text_cols() - 1] = '\0';
 
 #ifdef PHILZ_TOUCH_RECOVERY
-    ui_print_default_color(3);
+    // print last 3 log rows in default color: this will include the "Press Back to cancel." line
+    ui_print_preset_colors(3, NULL);
 #endif
 
+    // check if we should disable writing file names to log (speeds up backup/restore on some devices)
     if (use_nandroid_simple_logging.value)
         ui_set_log_stdout(0);
 
@@ -129,22 +138,38 @@ static void nandroid_callback(const char* filename) {
         ui_delete_line(2);
     }
 #ifdef PHILZ_TOUCH_RECOVERY
-    ui_print_color(0, 0);
+    ui_print_preset_colors(0, NULL);
 #endif
     ui_set_log_stdout(1);
 }
 
 static void compute_directory_stats(const char* directory) {
     char tmp[PATH_MAX];
+    char count_text[100];
+
+    // reset file count if we ever return before setting it
+    nandroid_files_count = 0;
+    nandroid_files_total = 0;
+
     sprintf(tmp, "find %s | %s wc -l > /tmp/dircount", directory, strcmp(directory, "/data") == 0 && is_data_media() ? "grep -v /data/media |" : "");
     __system(tmp);
-    char count_text[100];
-    FILE* f = fopen("/tmp/dircount", "r");
-    fread(count_text, 1, sizeof(count_text), f);
-    fclose(f);
-    nandroid_files_count = 0;
-    nandroid_files_total = atoi(count_text);
 
+    FILE* f = fopen("/tmp/dircount", "r");
+    if (f == NULL)
+        return;
+
+    if (fgets(count_text, sizeof(count_text), f) == NULL) {
+        fclose(f);
+        return;
+    }
+
+    size_t len = strlen(count_text);
+    if (count_text[len - 1] == '\n')
+        count_text[len - 1] = '\0';
+
+    fclose(f);
+    nandroid_files_total = atoi(count_text);
+    // in twrp backup mode, do not refresh this or it will be a flashy effect on compute_twrp_backup_stats() call
     if (!twrp_backup_mode.value) {
         ui_reset_progress();
         ui_show_progress(1, 0);
@@ -204,7 +229,7 @@ static int do_tar_compress(char* command, int callback, const char* backup_file_
         return -1;
     }
 
-    int nand_starts = 1;
+    int nand_starts = 1; // to run only once some user_cancel_nandroid() statements
     last_size_update = 0;
     while (fgets(buf, PATH_MAX, fp) != NULL) {
 #ifdef PHILZ_TOUCH_RECOVERY
@@ -226,21 +251,33 @@ static int do_tar_compress(char* command, int callback, const char* backup_file_
 
 static int tar_compress_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
     char tmp[PATH_MAX];
-    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar ; (tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, backup_file_image);
+#ifdef BOARD_RECOVERY_USE_BBTAR
+    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar ; set -o pipefail ; (tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, backup_file_image);
+#else
+    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar ; set -o pipefail ; (tar -csv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, backup_file_image);
+#endif
 
     return do_tar_compress(tmp, callback, backup_file_image);
 }
 
 static int tar_gzip_compress_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
     char tmp[PATH_MAX];
-    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar.gz ; (tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | pigz -c -%d | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.gz.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, compression_value.value, backup_file_image);
+#ifdef BOARD_RECOVERY_USE_BBTAR
+    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar.gz ; set -o pipefail ; (tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | pigz -c -%d | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.gz.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, compression_value.value, backup_file_image);
+#else
+    sprintf(tmp, "cd $(dirname %s) ; touch %s.tar.gz ; set -o pipefail ; (tar -csv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) | pigz -c -%d | split -a 1 -b 1000000000 /proc/self/fd/0 %s.tar.gz.) 2> /proc/self/fd/1 ; exit $?", backup_path, backup_file_image, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path, compression_value.value, backup_file_image);
+#endif
 
     return do_tar_compress(tmp, callback, backup_file_image);
 }
 
 static int tar_dump_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
     char tmp[PATH_MAX];
-    sprintf(tmp, "cd $(dirname %s); tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) 2> /dev/null | cat", backup_path, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path);
+#ifdef BOARD_RECOVERY_USE_BBTAR
+    sprintf(tmp, "cd $(dirname %s); set -o pipefail ; tar cv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) 2> /dev/null | cat", backup_path, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path);
+#else
+    sprintf(tmp, "cd $(dirname %s); set -o pipefail ; tar -csv --exclude=data/data/com.google.android.music/files/* %s $(basename %s) 2> /dev/null | cat", backup_path, strcmp(backup_path, "/data") == 0 && is_data_media() ? "--exclude 'media'" : "", backup_path);
+#endif
 
     return __system(tmp);
 }
@@ -284,7 +321,7 @@ static int dedupe_compress_wrapper(const char* backup_path, const char* backup_f
         return -1;
     }
 
-    int nand_starts = 1;
+    int nand_starts = 1; // to run only once some user_cancel_nandroid() statements
     last_size_update = 0;
     while (fgets(tmp, PATH_MAX, fp) != NULL) {
 #ifdef PHILZ_TOUCH_RECOVERY
@@ -303,6 +340,13 @@ static int dedupe_compress_wrapper(const char* backup_path, const char* backup_f
 
 static nandroid_backup_handler default_backup_handler = tar_compress_wrapper;
 static char forced_backup_format[5] = "";
+// this function will force the backup handler to be tar, whatever filesystem be it ext4 or yaffs2
+// we now disabled forcing to tar if it is yaffs2
+// nandroid_force_backup_format() is used for ors backup coupled to set_override_yaffs2_wrapper(0) to avoid forcing yaffs2 in tar format
+//  * in cwm mode: yaffs2 is not broken
+//  * in twrp mode: in all cases, we do not use get_backup_handler() and yaffs2 is always backed up as tar like in original TWRP
+// to force tar backup: nandroid_force_backup_format("tar");
+// after the backup, reset default backup handler: nandroid_force_backup_format("");
 void nandroid_force_backup_format(const char* fmt) {
     strcpy(forced_backup_format, fmt);
 }
@@ -342,6 +386,15 @@ unsigned nandroid_get_default_backup_format() {
     }
 }
 
+// force yaffs2 to be backed up with default_backup_handler (tar, tar.gz, dup)
+// used for make update.zip from ROM so that we can force it to tar format even on yaffs2 partitions (default behaviour)
+// while in ors backup mode, we can force backup ext4 partitions in tar format while keeping yaffs2 partitions default behaviour (backed up in .img)
+// this is done by calling set_override_yaffs2_wrapper(0)
+// in twrp mode, yaffs2 is always backed up in tar through nandroid_backup_partition_extended() like in TWRP. We do not need nandroid_force_backup_format()
+// we can this way freely use nandroid_force_backup_format() without breaking yaffs2 support when needed
+// To sum it:
+//  * calling nandroid_force_backup_format("tar") will force tar on all ext4/vfat/yaffs2 partitions
+//  * to force tar on all partitions except yaffs2, call set_override_yaffs2_wrapper(0) before nandroid_force_backup_format("tar")
 static int override_yaffs2_wrapper = 1;
 void set_override_yaffs2_wrapper(int set) {
     override_yaffs2_wrapper = set;
@@ -363,6 +416,7 @@ static nandroid_backup_handler get_backup_handler(const char *backup_path) {
         return default_backup_handler;
     }
 
+    // force yaffs2 to be backed up with default_backup_handler (tar/tar.gz/dup)
     if (override_yaffs2_wrapper && strlen(forced_backup_format) > 0)
         return default_backup_handler;
 
@@ -380,9 +434,11 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
     int ret = 0;
     char name[PATH_MAX];
     char tmp[PATH_MAX];
-    strcpy(name, basename(mount_point));
+    strcpy(name, BaseName(mount_point));
 
     struct stat file_info;
+    // sdcard is mounted at this point by previous call to refresh_default_backup_handler()
+    // let's ensure it anyway
     sprintf(tmp, "%s/%s", get_primary_storage_path(), NANDROID_HIDE_PROGRESS_FILE);
     ensure_path_mounted(tmp);
     int callback = stat(tmp, &file_info) != 0;
@@ -419,36 +475,35 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
         nandroid_backup_handler backup_handler = get_backup_handler(mount_point);
 
         if (backup_handler == NULL) {
-            ui_print("Error finding an appropriate backup handler.\n");
+            LOGE("Error finding an appropriate backup handler.\n");
             return -2;
         }
         ret = backup_handler(mount_point, tmp, callback);
-    }
-
-#ifdef RECOVERY_NEED_SELINUX_FIX
-    sprintf(tmp, "%s/%s", get_primary_storage_path(), NANDROID_IGNORE_SELINUX_FILE);
-    ensure_path_mounted(tmp);
-    if (0 != ret || strcmp(backup_path, "-") == 0 || file_found(tmp)) {
-        LOGI("skipping selinux context!\n");
-    }
-    else if (0 == strcmp(mount_point, "/data") ||
-                0 == strcmp(mount_point, "/system") ||
-                0 == strcmp(mount_point, "/cache"))
-    {
+#ifdef BOARD_RECOVERY_USE_BBTAR
+        sprintf(tmp, "%s/%s", get_primary_storage_path(), NANDROID_IGNORE_SELINUX_FILE);
+        ensure_path_mounted(tmp);
+        if (0 != ret || strcmp(backup_path, "-") == 0 || file_found(tmp) || backup_handler == dedupe_compress_wrapper) {
+            LOGI("skipping selinux context!\n");
+        }
+        else if (0 == strcmp(mount_point, "/data") ||
+                    0 == strcmp(mount_point, "/system") ||
+                    0 == strcmp(mount_point, "/cache"))
+        {
             ui_print("backing up selinux context...\n");
             sprintf(tmp, "%s/%s.context", backup_path, name);
-            if (backupcon_to_file(mount_point, tmp) < 0)
+            if (bakupcon_to_file(mount_point, tmp) < 0)
                 LOGE("backup selinux context error!\n");
             else
                 ui_print("backup selinux context completed.\n");
-    }
+        }
 #endif
+    }
 
     if (umount_when_finished) {
         ensure_path_unmounted(mount_point);
     }
     if (0 != ret) {
-        ui_print("Error while making a backup image of %s!\n", mount_point);
+        LOGE("Error while making a backup image of %s!\n", mount_point);
         return ret;
     }
     ui_print("Backup of %s completed.\n", name);
@@ -470,7 +525,9 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
             strcmp(vol->fs_type, "bml") == 0 ||
             strcmp(vol->fs_type, "emmc") == 0) {
         ui_print("\n>> Backing up %s...\n", root);
-        const char* name = basename(root);
+
+        char name[PATH_MAX];
+        sprintf(name, "%s", BaseName(root));
         if (strcmp(backup_path, "-") == 0)
             strcpy(tmp, "/proc/self/fd/1");
         else if (twrp_backup_mode.value)
@@ -480,7 +537,7 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
 
         ui_print("Backing up %s image...\n", name);
         if (0 != (ret = backup_raw_partition(vol->fs_type, vol->blk_device, tmp))) {
-            ui_print("Error while backing up %s image!\n", name);
+            LOGE("Error while backing up %s image!\n", name);
             return ret;
         }
 
@@ -493,8 +550,8 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
 
 int nandroid_backup(const char* backup_path) {
     nandroid_backup_bitfield = 0; // for dedupe mode
-    refresh_default_backup_handler();
-    
+    refresh_default_backup_handler(); // this will mount /sdcard (primary storage)
+
     if (ensure_path_mounted(backup_path) != 0) {
         return print_and_error("Can't mount backup path.\n");
     }
@@ -515,9 +572,13 @@ int nandroid_backup(const char* backup_path) {
     if (0 != (ret = Get_Size_Via_statfs(backup_path)))
         return print_and_error("Unable to stat backup path.\n");
 
+    // estimate backup size and ensure we have enough free space available on backup_path
     if (check_backup_size(backup_path) < 0)
         return print_and_error("Not enough free space: backup cancelled.\n");
 
+    // moved after backup size check to fix pause before showing low space prompt
+    // this is caused by friendly log view triggering on ui_set_background(BACKGROUND_ICON_INSTALLING) call
+    // also, it is expected to have the background installing icon when we actually start backup
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     nandroid_start_msec = timenow_msec(); // starts backup monitoring timer for total backup time
 #ifdef PHILZ_TOUCH_RECOVERY
@@ -531,6 +592,8 @@ int nandroid_backup(const char* backup_path) {
             0 != (ret = nandroid_backup_partition(backup_path, BOOT_PARTITION_MOUNT_POINT)))
         return ret;
 
+    // enabled by default (not an original CWM feature), but to restore, you need the Custom Restore Job
+    // when restoring from Nandroid Restore menu, recovery will not be restored (just like original CWM)
     if (backup_recovery && volume_for_path("/recovery") != NULL &&
             0 != (ret = nandroid_backup_partition(backup_path, "/recovery")))
         return ret;
@@ -607,8 +670,8 @@ int nandroid_backup(const char* backup_path) {
     vol = volume_for_path("/efs");
     if (backup_efs && vol != NULL) {
         //first backup in raw format, returns 0 on success (or if skipped), else 1
-        strcpy(tmp, backup_path);
-        if (0 != dd_raw_backup_handler(dirname(tmp), "/efs"))
+        sprintf(tmp, "%s", DirName(backup_path));
+        if (0 != dd_raw_backup_handler(tmp, "/efs"))
             ui_print("EFS raw image backup failed! Trying native backup...\n");
 
         //second backup in native cwm format
@@ -646,14 +709,8 @@ int nandroid_backup(const char* backup_path) {
             return ret;
     }
 
-    if (enable_md5sum.value) {
-        ui_print("Generating md5 sum...\n");
-        sprintf(tmp, "nandroid-md5.sh %s", backup_path);
-        if (0 != (ret = __system(tmp))) {
-            ui_print("Error while generating md5 sum!\n");
-            return ret;
-        }
-    }
+    if (enable_md5sum.value && 0 != (ret = gen_nandroid_md5sum(backup_path)))
+        return ret;
 
     sprintf(tmp, "cp /tmp/recovery.log %s/recovery.log", backup_path);
     __system(tmp);
@@ -697,7 +754,7 @@ int nandroid_dump(const char* partition) {
     }
 
     if (strcmp(partition, "recovery") == 0) {
-        return __system("dump_image recovery /proc/self/fd/1 | cat");
+        return __system("set -o pipefail ; dump_image recovery /proc/self/fd/1 | cat");
     }
 
     if (strcmp(partition, "data") == 0) {
@@ -774,14 +831,22 @@ static int do_tar_extract(char* command, const char* backup_file_image, const ch
 
 static int tar_gzip_extract_wrapper(const char* backup_file_image, const char* backup_path, int callback) {
     char tmp[PATH_MAX];
-    sprintf(tmp, "cd $(dirname %s) ; cat %s* | pigz -d -c | tar xv ; exit $?", backup_path, backup_file_image);
+#ifdef BOARD_RECOVERY_USE_BBTAR
+    sprintf(tmp, "cd $(dirname %s) ; set -o pipefail ; cat %s* | pigz -d -c | tar xv ; exit $?", backup_path, backup_file_image);
+#else
+    sprintf(tmp, "cd $(dirname %s) ; set -o pipefail ; cat %s* | pigz -d -c | tar -xsv ; exit $?", backup_path, backup_file_image);
+#endif
 
     return do_tar_extract(tmp, backup_file_image, backup_path, callback);
 }
 
 static int tar_extract_wrapper(const char* backup_file_image, const char* backup_path, int callback) {
     char tmp[PATH_MAX];
-    sprintf(tmp, "cd $(dirname %s) ; cat %s* | tar xv ; exit $?", backup_path, backup_file_image);
+#ifdef BOARD_RECOVERY_USE_BBTAR
+    sprintf(tmp, "cd $(dirname %s) ; set -o pipefail ; cat %s* | tar xv ; exit $?", backup_path, backup_file_image);
+#else
+    sprintf(tmp, "cd $(dirname %s) ; set -o pipefail ; cat %s* | tar -xsv ; exit $?", backup_path, backup_file_image);
+#endif
 
     return do_tar_extract(tmp, backup_file_image, backup_path, callback);
 }
@@ -819,7 +884,11 @@ static int dedupe_extract_wrapper(const char* backup_file_image, const char* bac
 
 static int tar_undump_wrapper(const char* backup_file_image, const char* backup_path, int callback) {
     char tmp[PATH_MAX];
+#ifdef BOARD_RECOVERY_USE_BBTAR
     sprintf(tmp, "cd $(dirname %s) ; tar xv ", backup_path);
+#else
+    sprintf(tmp, "cd $(dirname %s) ; tar -xsv ", backup_path);
+#endif
 
     return __system(tmp);
 }
@@ -851,11 +920,13 @@ static nandroid_restore_handler get_restore_handler(const char *backup_path) {
     return tar_extract_wrapper;
 }
 
+// include after all static handlers declarations
 #include "nandroid_advanced.c"
 
 int nandroid_restore_partition_extended(const char* backup_path, const char* mount_point, int umount_when_finished) {
     int ret = 0;
-    char* name = basename(mount_point);
+    char name[PATH_MAX];
+    sprintf(name, "%s", BaseName(mount_point));
 
     nandroid_restore_handler restore_handler = NULL;
     const char *filesystems[] = { "yaffs2", "ext2", "ext3", "ext4", "vfat", "exfat", "rfs", "f2fs", NULL };
@@ -875,6 +946,7 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
         restore_handler = tar_extract_wrapper;
         strcpy(tmp, "/proc/self/fd/0");
     } else if (twrp_backup_mode.value || 0 != (ret = stat(tmp, &file_info))) {
+        // if we are restoring a TWRP backup, arg 2 is not checked, Oufff!!
         // can't find the backup, it may be the new backup format?
         // iterate through the backup types
         printf("couldn't find old .img format\n");
@@ -938,7 +1010,7 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
                 ui_print("Skipping restore of %s\n", mount_point);
                 return 0;
             }
-            ui_print("Found backup image: %s\n", basename(tmp));
+            ui_print("Found backup image: %s\n", BaseName(tmp));
         } else if (backup_filesystem == NULL || restore_handler == NULL) {
             //ui_print("%s.img not found. Skipping restore of %s.\n", name, mount_point);
             ui_print("No %s backup found(img, tar, dup). Skipping restore of %s.\n", name, mount_point);
@@ -1011,23 +1083,19 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
         }
     }
 
-#ifdef RECOVERY_NEED_SELINUX_FIX
+#ifdef BOARD_RECOVERY_USE_BBTAR
     sprintf(tmp, "%s/%s", get_primary_storage_path(), NANDROID_IGNORE_SELINUX_FILE);
     ensure_path_mounted(tmp);
-    if (strcmp(backup_path, "-") == 0 || file_found(tmp)) {
-        LOGE("skipping restore of selinux context\n");
+    if (file_found(tmp) || strcmp(backup_path, "-") == 0 || restore_handler == dedupe_extract_wrapper) {
+        LOGI("don't need restore of selinux context\n");
     } else if (0 == strcmp(mount_point, "/data") || 0 == strcmp(mount_point, "/system") || 0 == strcmp(mount_point, "/cache")) {
+        sprintf(name, "%s", BaseName(mount_point));
+        sprintf(tmp, "%s/%s.context", backup_path, name);
+        if (file_found(tmp)) {
             ui_print("restoring selinux context...\n");
-            name = basename(mount_point);
-            sprintf(tmp, "%s/%s.context", backup_path, name);
-            if ((ret = restorecon_from_file(tmp)) < 0) {
-                ui_print("restorecon from %s.context error, trying regular restorecon.\n", name);
-                if ((ret = restorecon_recursive(mount_point, "/data/media/")) < 0) {
-                    LOGE("Restorecon %s error!\n", mount_point); 
-                    return ret;
-                }
-            }
+            ret = restorecon_from_file(tmp)
             ui_print("restore selinux context completed.\n");
+        }
     }
 #endif
 
@@ -1051,7 +1119,8 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
     if (strcmp(vol->fs_type, "mtd") == 0 || strcmp(vol->fs_type, "bml") == 0 || strcmp(vol->fs_type, "emmc") == 0) {
         ui_print("\n>> Restoring %s...\nUsing raw mode...\n", root);
         int ret;
-        const char* name = basename(root);
+        char name[PATH_MAX];
+        sprintf(name, "%s", BaseName(root));
 
         // fix partition could be formatted when no image to restore
         // exp: if md5 check disabled and empty backup folder
@@ -1064,7 +1133,7 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
             sprintf(tmp, "%s%s.img", backup_path, root);
 
         if (0 != strcmp(backup_path, "-") && 0 != stat(tmp, &file_check)) {
-            ui_print("%s not found. Skipping restore of %s\n", basename(tmp), root);
+            ui_print("%s not found. Skipping restore of %s\n", BaseName(tmp), root);
             return 0;
         }
 
@@ -1084,23 +1153,24 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
 }
 
 int nandroid_restore(const char* backup_path, int restore_boot, int restore_system, int restore_data, int restore_cache, int restore_sdext, int restore_wimax) {
-    Backup_Size = 0;
+    Backup_Size = 0; // by default, do not calculate size
+
+    // progress bar will be of indeterminate progress
+    // setting nandroid_files_total = 0 will force this in nandroid_callback()
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
     nandroid_files_total = 0;
     nandroid_start_msec = timenow_msec();
 #ifdef PHILZ_TOUCH_RECOVERY
+    // support dim screen timeout during nandroid operation
     last_key_ev = timenow_msec();
 #endif
     if (ensure_path_mounted(backup_path) != 0)
         return print_and_error("Can't mount backup path\n");
 
     char tmp[PATH_MAX];
-    if (enable_md5sum.value) {
-        ui_print("Checking MD5 sums...\n");
-        sprintf(tmp, "cd %s && md5sum -c nandroid.md5", backup_path);
-        if (0 != __system(tmp))
-            return print_and_error("MD5 mismatch!\n");
+    if (enable_md5sum.value && verify_nandroid_md5sum(backup_path) != 0) {
+        return print_and_error("MD5 verification failed!\n");
     }
 
     int ret;
@@ -1108,6 +1178,7 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
     if (restore_boot && volume_for_path(BOOT_PARTITION_MOUNT_POINT) != NULL && 0 != (ret = nandroid_restore_partition(backup_path, BOOT_PARTITION_MOUNT_POINT)))
         return ret;
 
+    // /recovery backup is always done in original CWM, but restore is never done! Support only in custom backup
     if (is_custom_backup) {
         if (backup_recovery && volume_for_path("/recovery") != NULL && 0 != (ret = nandroid_restore_partition(backup_path, "/recovery")))
             return ret;
@@ -1311,10 +1382,23 @@ int bu_main(int argc, char** argv) {
             dup2(fd, STDIN_FILENO);
             close(fd);
         }
+
         char partition[100];
         FILE* f = fopen("/tmp/ro.bu.restore", "r");
-        fread(partition, 1, sizeof(partition), f);
-        fclose(f);
+        if (f == NULL) {
+            printf("cannot open ro.bu.restore\n");
+            return bu_usage();
+        }
+
+        if (fgets(partition, sizeof(partition), f) == NULL) {
+            fclose(f);
+            printf("nothing to restore!\n");
+            return bu_usage();
+        }
+
+        size_t len = strlen(partition);
+        if (partition[len - 1] == '\n')
+            partition[len - 1] = '\0';
 
         // fprintf(stderr, "%d %d %s\n", fd, STDIN_FILENO, argv[3]);
         return nandroid_undump(partition);
@@ -1359,31 +1443,33 @@ int nandroid_main(int argc, char** argv) {
     return nandroid_usage();
 }
 
-#ifdef RECOVERY_NEED_SELINUX_FIX
+#ifdef BOARD_RECOVERY_USE_BBTAR
 static int nochange;
 static int verbose;
-int backupcon_to_file(const char *pathname, const char *filename) {
+int bakupcon_to_file(const char *pathname, const char *filename)
+{
     int ret = 0;
     struct stat sb;
     char* filecontext = NULL;
     FILE * f = NULL;
     if (lstat(pathname, &sb) < 0) {
-        LOGW("backupcon_to_file: %s not found\n", pathname);
+        LOGW("bakupcon_to_file: %s not found\n", pathname);
         return -1;
     }
 
     if (lgetfilecon(pathname, &filecontext) < 0) {
-        LOGW("backupcon_to_file: can't get %s context\n", pathname);
+        LOGW("bakupcon_to_file: can't get %s context\n", pathname);
         ret = 1;
     }
     else {
         if ((f = fopen(filename, "a+")) == NULL) {
-            LOGE("backupcon_to_file: can't create %s\n", filename);
+            LOGE("bakupcon_to_file: can't create %s\n", filename);
             return -1;
         }
         //fprintf(f, "chcon -h %s '%s'\n", filecontext, pathname);
         fprintf(f, "%s\t%s\n", pathname, filecontext);
         fclose(f);
+        freecon(filecontext);
     }
 
     //skip read symlink directory
@@ -1406,7 +1492,7 @@ int backupcon_to_file(const char *pathname, const char *filename) {
                 strncmp(entryname, "/data/data/com.google.android.music/files/", 42) == 0 )
             continue;
 
-        backupcon_to_file(entryname, filename);
+        bakupcon_to_file(entryname, filename);
         free(entryname);
     }
 
@@ -1414,7 +1500,8 @@ int backupcon_to_file(const char *pathname, const char *filename) {
     return ret;
 }
 
-int restorecon_from_file(const char *filename) {
+int restorecon_from_file(const char *filename)
+{
     int ret = 0;
     FILE * f = NULL;
     if ((f = fopen(filename, "r")) == NULL)
@@ -1432,18 +1519,21 @@ int restorecon_from_file(const char *filename) {
         char *buf = linebuf;
 
         p1 = strtok(buf, "\t");
+        if (!p1) continue;
         p2 = strtok(NULL, "\t");
+        if (!p2) continue;
         LOGI("%s %s\n", p1, p2);
         if (lsetfilecon(p1, p2) < 0) {
-            LOGW("restorecon_from_file: can't setfilecon %s\n", p1);
-            ret = 1;
+            LOGE("restorecon_from_file: can't setfilecon %s\n", p1);
+            ret++;
         }
     }
     fclose(f);
     return ret;
 }
 
-int restorecon_recursive(const char *pathname, const char *exclude) {
+int restorecon_recursive(const char *pathname, const char *exclude)
+{
     int ret = 0;
     struct stat sb;
     if (lstat(pathname, &sb) < 0) {
@@ -1455,12 +1545,13 @@ int restorecon_recursive(const char *pathname, const char *exclude) {
         if (strncmp(pathname, exclude, strlen(exclude)) == 0)
             return 0;
     }
-    if (selinux_android_restorecon(pathname) < 0) {
+    //if (selinux_android_restorecon(pathname, 0) < 0) {
+    if (restorecon(pathname, &sb) < 0) {
         LOGW("restorecon: error restoring %s context\n", pathname);
         ret = 1;
     }
 
-    // skip symlink dir
+    //skip symlink dir
     if (S_ISLNK(sb.st_mode)) return 0;
 
     DIR *dir = opendir(pathname);
@@ -1484,4 +1575,107 @@ int restorecon_recursive(const char *pathname, const char *exclude) {
     closedir(dir);
     return ret;
 }
+
+extern struct selabel_handle *sehandle;
+int restorecon(const char *pathname, const struct stat *sb)
+{
+    char *oldcontext, *newcontext;
+
+    if (lgetfilecon(pathname, &oldcontext) < 0) {
+        fprintf(stderr, "Could not get context of %s:  %s\n",
+                pathname, strerror(errno));
+        return -1;
+    }
+    if (selabel_lookup(sehandle, &newcontext, pathname, sb->st_mode) < 0) {
+        fprintf(stderr, "Could not lookup context for %s:  %s\n", pathname,
+               strerror(errno));
+        return -1;
+    }
+    if (strcmp(newcontext, "<<none>>") &&
+        strcmp(oldcontext, newcontext)) {
+        if (verbose)
+            fprintf(stdout, "Relabeling %s from %s to %s.\n", pathname,
+                    oldcontext, newcontext);
+        if (!nochange) {
+            if (lsetfilecon(pathname, newcontext) < 0) {
+                fprintf(stderr, "Could not label %s with %s:  %s\n",
+                        pathname, newcontext, strerror(errno));
+                return -1;
+            }
+        }
+    }
+    freecon(oldcontext);
+    freecon(newcontext);
+    return 0;
+}
+/*
+int restorecon_main(int argc, char **argv)
+{
+    int ch, recurse = 0;
+    int i = 0;
+
+    char *exclude = NULL , *progname = argv[0];
+
+    do {
+        ch = getopt(argc, argv, "nrRe:v");
+        if (ch == EOF)
+            break;
+        switch (ch) {
+        case 'n':
+            nochange = 1;
+            break;
+        case 'r':
+        case 'R':
+            recurse = 1;
+            break;
+        case 'v':
+            verbose = 1;
+            break;
+        case 'e':
+            exclude = optarg;
+            break;
+        default:
+            printf("usage:  %s [-nrRev] pathname...\n", progname);
+            return 1;
+        }
+    } while (1);
+
+    argc -= optind;
+    argv += optind;
+    if (!argc) {
+        printf("usage:  %s [-nrRev] pathname...\n", progname);
+        return 1;
+    }
+    //sehandle = selinux_android_file_context_handle();
+    //if (!sehandle) {
+    //    printf("Could not load file_contexts:  %s\n",
+    //            strerror(errno));
+    //    return -1;
+    //}
+    int rc;
+    struct stat sb;
+    if (recurse) {
+        for (i = 0; i < argc; i++) {
+            rc = lstat(argv[i], &sb);
+            if (rc < 0) {
+                printf("Could not stat %s:  %s\n", argv[i],
+                        strerror(errno));
+                continue;
+            }
+            restorecon_recursive(argv[i], exclude);
+        }
+    } else {
+        for (i = 0; i < argc; i++) {
+            rc = lstat(argv[i], &sb);
+            if (rc < 0) {
+                printf("Could not stat %s:  %s\n", argv[i],
+                        strerror(errno));
+                continue;
+            }
+            restorecon(argv[i], &sb);
+        }
+    }
+
+    return 0;
+}*/
 #endif

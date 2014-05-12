@@ -1,10 +1,32 @@
+/*
+    PhilZ Touch - touch_gui library
+    Copyright (C) <2014>  <phytowardt@gmail.com>
+
+    This file is part of PhilZ Touch Recovery
+
+    PhilZ Touch is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    PhilZ Touch is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with PhilZ Touch.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+
+
 // PhilZ Touch config file
 
 #ifndef __ADVANCED_FUNCTIONS_H
 #define __ADVANCED_FUNCTIONS_H
 
 
-#include "ui_defines.h"
+#include "ui_defines.h" // MENU_MAX_COLS, CHAR_HEIGHT, CHAR_WIDTH
 
 // format toggle menus to screen width
 // used to format toggle menus to device screen width (only touch build)
@@ -42,6 +64,7 @@ int ors_backup_command(const char* backup_path, const char* options);
 unsigned long long gettime_nsec();
 long long timenow_usec(void);
 long long timenow_msec(void);
+int is_time_interval_passed(long long msec_interval);
 char* readlink_device_blk(const char* Path);
 unsigned long Get_File_Size(const char* Path);
 unsigned long long Get_Folder_Size(const char* Path);
@@ -51,6 +74,24 @@ void delete_a_file(const char* filename);
 void ensure_directory(const char* dir); // in nandroid.c
 int is_path_ramdisk(const char* path);
 int copy_a_file(const char* file_in, const char* file_out);
+int append_string_to_file(const char* filename, const char* string);
+char* find_file_in_path(const char* dir, const char* filename, int depth, int follow);
+char* read_file_to_buffer(const char* filepath, unsigned long *len);
+char* BaseName(const char* path);
+char* DirName(const char* path);
+
+// case insensitive C-string compare (adapted from titanic-fanatic)
+int strcmpi(const char *str1, const char *str2);
+
+// calculate md5sum when installing zip files from menu
+void start_md5_display_thread(char* filepath);
+void stop_md5_display_thread();
+void start_md5_verify_thread(char* filepath);
+void stop_md5_verify_thread();
+
+// md5sum calculate / display / write / check
+int write_md5digest(const char* filepath, const char* md5file, int append);
+int verify_md5digest(const char* filepath, const char* md5file);
 
 // custom zip path + free browse mode
 void set_ensure_mount_always_true(int state);

@@ -51,8 +51,6 @@
 #include "libtouch_gui/gui_settings.h"
 #endif
 
-int check_update_binary_version = 1;
-
 int get_filtered_menu_selection(const char** headers, char** items, int menu_only, int initial_selection, int items_count) {
     int index;
     int offset = 0;
@@ -86,19 +84,27 @@ int get_filtered_menu_selection(const char** headers, char** items, int menu_onl
     return ret;
 }
 
-void write_string_to_file(const char* filename, const char* string) {
-    ensure_path_mounted(filename);
+// returns negative value on failure and total bytes written on success
+int write_string_to_file(const char* filename, const char* string) {
     char tmp[PATH_MAX];
+    int ret = -1;
+
+    ensure_path_mounted(filename);
     sprintf(tmp, "mkdir -p $(dirname %s)", filename);
     __system(tmp);
     FILE *file = fopen(filename, "w");
     if (file != NULL) {
-        fprintf(file, "%s", string);
+        ret = fprintf(file, "%s", string);
         fclose(file);
     } else
         LOGE("Cannot write to %s\n", filename);
+
+    return ret;
 }
 
+// called on recovery exit
+// data will be mounted by call to write_string_to_file() on /data/media devices
+// we need to ensure a proper unmount
 void write_recovery_version() {
     char path[PATH_MAX];
     sprintf(path, "%s/%s", get_primary_storage_path(), RECOVERY_VERSION_FILE);
@@ -138,6 +144,13 @@ void toggle_signature_check() {
     // ui_print("Signature Check: %s\n", signature_check_enabled.value ? "Enabled" : "Disabled");
 }
 
+static void toggle_install_zip_verify_md5() {
+    char value[3];
+    install_zip_verify_md5.value ^= 1;
+    sprintf(value, "%d", install_zip_verify_md5.value);
+    write_config_file(PHILZ_SETTINGS_FILE, install_zip_verify_md5.key, value);
+}
+
 #ifdef ENABLE_LOKI
 static void toggle_loki_support() {
     char value[3];
@@ -150,16 +163,16 @@ static void toggle_loki_support() {
 // this is called when we load recovery settings
 // it is needed when after recovery is booted, user wipes /data, then he installs a ROM: we can still return the user setting 
 int loki_support_enabled() {
-    char device_supports_loki[PROPERTY_VALUE_MAX];
+    char no_loki_variant[PROPERTY_VALUE_MAX];
     int ret = -1;
 
-    property_get("ro.loki_enabled", device_supports_loki, "0");
-    if (strcmp(device_supports_loki, "1") == 0) {
+    property_get("ro.loki_disabled", no_loki_variant, "0");
+    if (strcmp(no_loki_variant, "0") == 0) {
         // device variant supports loki: check if user enabled it
         // if there is no settings file (read_config_file() < 0), it could be we have wiped /data before installing zip
         // in that case, return current value (we last loaded on start or when user last set it) and not default
-        if (read_config_file(PHILZ_SETTINGS_FILE, apply_loki_patch.key, device_supports_loki, "1") >= 0) {
-            if (strcmp(device_supports_loki, "false") == 0 || strcmp(device_supports_loki, "0") == 0)
+        if (read_config_file(PHILZ_SETTINGS_FILE, apply_loki_patch.key, no_loki_variant, "0") >= 0) {
+            if (strcmp(no_loki_variant, "true") == 0 || strcmp(no_loki_variant, "1") == 0)
                 apply_loki_patch.value = 0;
             else
                 apply_loki_patch.value = 1;
@@ -176,7 +189,7 @@ int install_zip(const char* packagefilepath) {
         set_sdcard_update_bootloader_message();
     }
 
-    int status = install_package(packagefilepath);
+    int status = install_package(packagefilepath); // will ensure_path_mounted(packagefilepath) 
     ui_reset_progress();
     if (status != INSTALL_SUCCESS) {
         ui_set_background(BACKGROUND_ICON_ERROR);
@@ -208,6 +221,7 @@ int install_zip(const char* packagefilepath) {
 int show_install_update_menu() {
     char buf[100];
     int i = 0, chosen_item = 0;
+    // + 1 for last NULL item
     static char* install_menu_items[MAX_NUM_MANAGED_VOLUMES + FIXED_INSTALL_ZIP_MENUS + 1];
 
     char* primary_path = get_primary_storage_path();
@@ -230,13 +244,13 @@ int show_install_update_menu() {
 
     // FIXED_BOTTOM_INSTALL_ZIP_MENUS
     char item_toggle_signature_check[MENU_MAX_COLS] = "";
-    char item_check_update_binary_version[MENU_MAX_COLS] = "";
+    char item_install_zip_verify_md5[MENU_MAX_COLS] = "";
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes]     = "Choose zip Using Free Browse Mode";
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 1] = "Choose zip from Last Install Folder";
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 2] = "Install zip from sideload";
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 3] = "Install Multiple zip Files";
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 4] = item_toggle_signature_check;
-    install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 5] = item_check_update_binary_version;
+    install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 5] = item_install_zip_verify_md5;
     install_menu_items[FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 6] = "Setup Free Browse Mode";
 
     // extra NULL for GO_BACK
@@ -247,9 +261,9 @@ int show_install_update_menu() {
             ui_format_gui_menu(item_toggle_signature_check, "Signature Verification", "(x)");
         else ui_format_gui_menu(item_toggle_signature_check, "Signature Verification", "( )");
 
-        if (check_update_binary_version)
-            ui_format_gui_menu(item_check_update_binary_version, "Don't Allow Old update-binary", "(x)");
-        else ui_format_gui_menu(item_check_update_binary_version, "Don't Allow Old update-binary", "( )");
+        if (install_zip_verify_md5.value)
+            ui_format_gui_menu(item_install_zip_verify_md5, "Verify zip md5sum", "(x)");
+        else ui_format_gui_menu(item_install_zip_verify_md5, "Verify zip md5sum", "( )");
 
         chosen_item = get_menu_selection(headers, install_menu_items, 0, 0);
         if (chosen_item == 0) {
@@ -257,6 +271,7 @@ int show_install_update_menu() {
         } else if (chosen_item >= FIXED_TOP_INSTALL_ZIP_MENUS && chosen_item < FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes) {
             show_choose_zip_menu(extra_paths[chosen_item - FIXED_TOP_INSTALL_ZIP_MENUS]);
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes) {
+            // browse for zip files up/backward including root system and have a default user set start folder
             if (show_custom_zip_menu() != 0)
                 set_custom_zip_path();
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 1) {
@@ -272,11 +287,7 @@ int show_install_update_menu() {
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 4) {
             toggle_signature_check();
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 5) {
-            check_update_binary_version ^= 1;
-            if (!check_update_binary_version) {
-                ui_print("Try fixing some assert errors\n");
-                ui_print("Setting will be reset on reboot\n");
-            }
+            toggle_install_zip_verify_md5();
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 6) {
             set_custom_zip_path();
         } else {
@@ -306,8 +317,10 @@ void free_string_array(char** array) {
     free(array);
 }
 
-char** gather_files(const char* directory, const char* fileExtensionOrDirectory, int* numFiles) {
-    char path[PATH_MAX] = "";
+// to gather directories you need to pass NULL for fileExtensionOrDirectory
+// else, only files are gathered. Pass "" to gather all files
+// NO  MORE NEEDED: if it is not called by choose_file_menu(), passed directory MUST end with a trailing /
+char** gather_files(const char* basedir, const char* fileExtensionOrDirectory, int* numFiles) {
     DIR *dir;
     struct dirent *de;
     int total = 0;
@@ -315,7 +328,15 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
     char** files = NULL;
     int pass;
     *numFiles = 0;
-    int dirLen = strlen(directory);
+    int dirLen = strlen(basedir);
+    char directory[PATH_MAX];
+
+    // Append a trailing slash if necessary
+    strcpy(directory, basedir);
+    if (directory[dirLen - 1] != '/') {
+        strcat(directory, "/");
+        ++dirLen;
+    }
 
     dir = opendir(directory);
     if (dir == NULL) {
@@ -327,8 +348,9 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
     if (fileExtensionOrDirectory != NULL)
         extension_length = strlen(fileExtensionOrDirectory);
 
-    int isCounting = 1;
     i = 0;
+    // first pass (pass==0) only returns "total" valid file names to initialize files[total] size
+    // second pass (pass == 1), rewinddir and initializes files[i] with directory contents
     for (pass = 0; pass < 2; pass++) {
         while ((de = readdir(dir)) != NULL) {
             // skip hidden files
@@ -338,11 +360,15 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
             // NULL means that we are gathering directories, so skip this
             if (fileExtensionOrDirectory != NULL) {
                 if (strcmp("", fileExtensionOrDirectory) == 0) {
+                    // we exclude directories since they are gathered on second call to gather_files() by choose_file_menu()
+                    // and we keep stock behavior: folders are gathered only by passing NULL
+                    // else, we break things at strcat(files[i], "/") in end of while loop
                     struct stat info;
                     char fullFileName[PATH_MAX];
                     strcpy(fullFileName, directory);
                     strcat(fullFileName, de->d_name);
                     lstat(fullFileName, &info);
+                    // make sure it is not a directory
                     if (S_ISDIR(info.st_mode))
                         continue;
                 } else {
@@ -369,6 +395,7 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
                 continue;
             }
 
+            // only second pass (pass==1) reaches here: initializes files[i] with directory contents
             files[i] = (char*)malloc(dirLen + strlen(de->d_name) + 2);
             strcpy(files[i], directory);
             strcat(files[i], de->d_name);
@@ -380,6 +407,8 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
             break;
         if (total == 0)
             break;
+        // only first pass (pass == 0) reaches here. We rewinddir for second pass
+        // initialize "total" with number of valid files to show and initialize files[total]
         rewinddir(dir);
         *numFiles = total;
         files = (char**)malloc((total + 1) * sizeof(char*));
@@ -400,7 +429,7 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
             int curMax = -1;
             int j;
             for (j = 0; j < total - i; j++) {
-                if (curMax == -1 || strcmp(files[curMax], files[j]) < 0)
+                if (curMax == -1 || strcmpi(files[curMax], files[j]) < 0)
                     curMax = j;
             }
             char* temp = files[curMax];
@@ -413,6 +442,11 @@ char** gather_files(const char* directory, const char* fileExtensionOrDirectory,
 }
 
 // pass in NULL for fileExtensionOrDirectory and you will get a directory chooser
+// pass in "" to gather all files without filtering extension or filename
+// returned directory (when NULL is passed as file extension) has a trailing / causing a wired // return path
+// choose_file_menu returns NULL when no file is found or if we choose no file in selection
+// no_files_found = 1 when no valid file was found, no_files_found = 0 when we found a valid file
+// WARNING : CALLER MUST ALWAYS FREE THE RETURNED POINTER
 int no_files_found = 0;
 char* choose_file_menu(const char* basedir, const char* fileExtensionOrDirectory, const char* headers[]) {
     const char* fixed_headers[20];
@@ -473,12 +507,16 @@ char* choose_file_menu(const char* basedir, const char* fileExtensionOrDirectory
             if (chosen_item < numDirs) {
                 char* subret = choose_file_menu(dirs[chosen_item], fileExtensionOrDirectory, headers);
                 if (subret != NULL) {
+                    // we selected either a folder (or a file from a re-entrant call)
                     return_value = strdup(subret);
                     free(subret);
                     break;
                 }
+                // the previous re-entrant call did a GO_BACK, REFRESH or no file found in a directory: subret == NULL
+                // we drop to up folder
                 continue;
             }
+            // we selected a file
             return_value = strdup(files[chosen_item - numDirs]);
             break;
         }
@@ -501,13 +539,23 @@ void show_choose_zip_menu(const char *mount_point) {
     char* file = choose_file_menu(mount_point, ".zip", headers);
     if (file == NULL)
         return;
-    static char* confirm_install = "Confirm install?";
-    static char confirm[PATH_MAX];
-    sprintf(confirm, "Yes - Install %s", basename(file));
 
-    if (confirm_selection(confirm_install, confirm)) {
+    char tmp[PATH_MAX];
+    int yes_confirm;
+
+    sprintf(tmp, "Yes - Install %s", BaseName(file));
+    if (install_zip_verify_md5.value) start_md5_verify_thread(file);
+    else start_md5_display_thread(file);
+
+    yes_confirm = confirm_selection("Confirm install?", tmp);
+
+    if (install_zip_verify_md5.value) stop_md5_verify_thread();
+    else stop_md5_display_thread();
+
+    if (yes_confirm) {
         install_zip(file);
-        write_last_install_path(dirname(file));
+        sprintf(tmp, "%s", DirName(file));
+        write_last_install_path(tmp);
     }
 
     free(file);
@@ -533,31 +581,31 @@ void show_nandroid_restore_menu(const char* path) {
     free(file);
 }
 
-void show_nandroid_delete_menu(const char* path) {
-    if (ensure_path_mounted(path) != 0) {
-        LOGE("Can't mount %s\n", path);
+void show_nandroid_delete_menu(const char* volume_path) {
+    if (ensure_path_mounted(volume_path) != 0) {
+        LOGE("Can't mount %s\n", volume_path);
         return;
     }
 
     static const char* headers[] = { "Choose a backup to delete", NULL };
-
-    char backup_path[PATH_MAX];
+    char path[PATH_MAX];
     char tmp[PATH_MAX];
+    char* file;
 
     if (twrp_backup_mode.value) {
         char device_id[PROPERTY_VALUE_MAX];
         get_device_id(device_id);
-        sprintf(backup_path, "%s/%s/%s", path, TWRP_BACKUP_PATH, device_id);
+        sprintf(path, "%s/%s/%s", volume_path, TWRP_BACKUP_PATH, device_id);
     } else {
-        sprintf(backup_path, "%s/%s", path, CWM_BACKUP_PATH);    
+        sprintf(path, "%s/%s", volume_path, CWM_BACKUP_PATH);    
     }
 
     for(;;) {
-        char* file = choose_file_menu(backup_path, NULL, headers);
+        file = choose_file_menu(path, NULL, headers);
         if (file == NULL)
             return;
 
-        sprintf(tmp, "Yes - Delete %s", basename(file));
+        sprintf(tmp, "Yes - Delete %s", BaseName(file));
         if (confirm_selection("Confirm delete?", tmp)) {
             sprintf(tmp, "rm -rf '%s'", file);
             __system(tmp);
@@ -620,12 +668,20 @@ int confirm_selection(const char* title, const char* confirm) {
     if (0 == stat(path, &info))
         return 1;
 
+#ifdef BOARD_NATIVE_DUALBOOT
+    char buf[PATH_MAX];
+    device_build_selection_title(buf, title);
+    title = (char*)&buf;
+#endif
+
     int many_confirm;
     char* confirm_str = strdup(confirm);
     const char* confirm_headers[] = { title, "  THIS CAN NOT BE UNDONE.", "", NULL };
+    int old_val = ui_is_showing_back_button();
+    ui_set_showing_back_button(0);
 
     sprintf(path, "%s/%s", get_primary_storage_path(), RECOVERY_MANY_CONFIRM_FILE);
-    ensure_path_mounted(path);
+    // ensure_path_mounted(path);
     many_confirm = 0 == stat(path, &info);
 
     if (many_confirm) {
@@ -652,6 +708,7 @@ int confirm_selection(const char* title, const char* confirm) {
         ret = (chosen_item == 1);
     }
     free(confirm_str);
+    ui_set_showing_back_button(old_val);
     return ret;
 }
 
@@ -660,8 +717,13 @@ int confirm_selection(const char* title, const char* confirm) {
 #define E2FSCK_BIN      "/sbin/e2fsck"
 extern void reset_ext4fs_info();
 
+// format_device() is called only by nandroid_restore_partition_extended()
 extern struct selabel_handle *sehandle;
 int format_device(const char *device, const char *path, const char *fs_type) {
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+    if(device_truedualboot_format_device(device, path, fs_type) <= 0)
+        return 0;
+#endif
     if (is_data_media_volume_path(path)) {
         return format_unknown_device(NULL, path, NULL);
     }
@@ -847,7 +909,7 @@ typedef struct {
 MFMatrix get_mnt_fmt_capabilities(char *fs_type, char *mount_point) {
     MFMatrix mfm = { mount_point, 1, 1 };
 
-    const int NUM_FS_TYPES = 5;
+    const int NUM_FS_TYPES = 6;
     MFMatrix *fs_matrix = malloc(NUM_FS_TYPES * sizeof(MFMatrix));
     // Defined capabilities:   fs_type     mnt fmt
     fs_matrix[0] = (MFMatrix){ "bml",       0,  1 };
@@ -855,6 +917,7 @@ MFMatrix get_mnt_fmt_capabilities(char *fs_type, char *mount_point) {
     fs_matrix[2] = (MFMatrix){ "emmc",      0,  1 };
     fs_matrix[3] = (MFMatrix){ "mtd",       0,  0 };
     fs_matrix[4] = (MFMatrix){ "ramdisk",   0,  0 };
+    fs_matrix[5] = (MFMatrix){ "swap",      0,  0 };
 
     const int NUM_MNT_PNTS = 6;
     MFMatrix *mp_matrix = malloc(NUM_MNT_PNTS * sizeof(MFMatrix));
@@ -990,6 +1053,8 @@ int show_partition_menu() {
             } else {
                 if (!confirm_selection("format /data and /data/media (/sdcard)", confirm))
                     continue;
+                // sets int ignore_data_media = 1
+                // when ignore_data_media = 1, this will truly format /data as a partition (roots.c)
                 ignore_data_media_workaround(1);
                 ui_print("Formatting /data...\n");
                 if (0 != format_volume("/data"))
@@ -997,6 +1062,10 @@ int show_partition_menu() {
                 else
                     ui_print("Done.\n");
                 ignore_data_media_workaround(0);
+
+                // recreate /data/media with proper permissions
+                ensure_path_mounted("/data");
+                setup_data_media();
             }
         } else if (is_data_media() && chosen_item == (mountable_volumes + formatable_volumes + 1)) {
             show_mount_usb_storage_menu();
@@ -1326,6 +1395,7 @@ out:
     return chosen_item;
 }
 
+// pass in mount point as argument
 void format_sdcard(const char* volume) {
     if (is_data_media_volume_path(volume))
         return;
@@ -1378,11 +1448,14 @@ void format_sdcard(const char* volume) {
                 sprintf(cmd, "/sbin/mkntfs -f %s", v->blk_device);
                 ret = __system(cmd);
             } else if (strcmp(list[chosen_item], "ext4") == 0) {
-                char options[64] = "";
-                if (v->length)
-                    sprintf(options, "-l %lld", v->length);
-                sprintf(cmd, "/sbin/make_ext4fs -J %s %s", options, v->blk_device);
-                ret = __system(cmd);
+                char *secontext = NULL;
+                if (selabel_lookup(sehandle, &secontext, v->mount_point, S_IFDIR) < 0) {
+                    LOGE("cannot lookup security context for %s\n", v->mount_point);
+                    ret = make_ext4fs(v->blk_device, v->length, volume, NULL);
+                } else {
+                    ret = make_ext4fs(v->blk_device, v->length, volume, sehandle);
+                    freecon(secontext);
+                }
             }
             break;
         }
@@ -1537,14 +1610,27 @@ void show_advanced_power_menu() {
 }
 
 #ifdef ENABLE_LOKI
-    #define FIXED_ADVANCED_ENTRIES 6
+
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+#define FIXED_ADVANCED_ENTRIES 8
 #else
-    #define FIXED_ADVANCED_ENTRIES 5
+#define FIXED_ADVANCED_ENTRIES 6
+#endif
+
+#else
+
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+#define FIXED_ADVANCED_ENTRIES 7
+#else
+#define FIXED_ADVANCED_ENTRIES 5
+#endif
+
 #endif
 
 int show_advanced_menu() {
     char buf[80];
-    int i = 0, j = 0, chosen_item = 0;
+    int i = 0, j = 0, chosen_item = 0, list_index = 0;
+    /* Default number of entries if no compile-time extras are added */
     static char* list[MAX_NUM_MANAGED_VOLUMES + FIXED_ADVANCED_ENTRIES + 1];
 
     char* primary_path = get_primary_storage_path();
@@ -1555,13 +1641,20 @@ int show_advanced_menu() {
 
     memset(list, 0, MAX_NUM_MANAGED_VOLUMES + FIXED_ADVANCED_ENTRIES + 1);
 
-    list[0] = "Wipe Dalvik Cache";
-    list[1] = "Report Error";
-    list[2] = "Key Test";
-    list[3] = "Show log";
-    list[4] = NULL;
+    list[list_index++] = "Wipe Dalvik Cache";   // 0
+    list[list_index++] = "Report Error";        // 1
+    list[list_index++] = "Key Test";            // 2
+    list[list_index++] = "Show log";            // 3
+    list[list_index++] = NULL;                  // 4 (/data/media/0 toggle)
+
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+    int index_tdb = list_index++;
+    int index_bootmode = list_index++;
+#endif
+
 #ifdef ENABLE_LOKI
-    list[5] = NULL;
+    int index_loki = list_index++;
+    list[index_loki] = NULL;
 #endif
 
     char list_prefix[] = "Partition ";
@@ -1590,17 +1683,27 @@ int show_advanced_menu() {
             else list[4] = "Sdcard target: /data/media";
         }
 
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+        char tdb_name[PATH_MAX];
+        device_get_truedualboot_entry(tdb_name);
+        list[index_tdb] = &tdb_name;
+
+        char bootmode_name[PATH_MAX];
+        device_get_bootmode(bootmode_name);
+        list[index_bootmode] = &bootmode_name;
+#endif
+
 #ifdef ENABLE_LOKI
         char item_loki_toggle_menu[MENU_MAX_COLS];
         int enabled = loki_support_enabled();
         if (enabled < 0) {
-            list[5] = NULL;
+            list[index_loki] = NULL;
         } else {
             if (enabled)
                 ui_format_gui_menu(item_loki_toggle_menu, "Apply Loki Patch", "(x)");
             else
                 ui_format_gui_menu(item_loki_toggle_menu, "Apply Loki Patch", "( )");
-            list[5] = item_loki_toggle_menu;
+            list[index_loki] = item_loki_toggle_menu;
         }
 #endif
 
@@ -1642,7 +1745,9 @@ int show_advanced_menu() {
 #ifdef PHILZ_TOUCH_RECOVERY
                 show_log_menu();
 #else
-                ui_printlogtail(12);
+                ui_printlogtail(24);
+                ui_wait_key();
+                ui_clear_key_queue();
 #endif
                 break;
             case 4: {
@@ -1651,7 +1756,7 @@ int show_advanced_menu() {
                         write_string_to_file("/data/media/.cwm_force_data_media", "1");
                         ui_print("storage set to /data/media\n");
                     } else {
-                        mkdir("/data/media/0", S_IRWXU | S_IRWXG | S_IRWXO);
+                        mkdir("/data/media/0", S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH); 
                         delete_a_file("/data/media/.cwm_force_data_media");
                         ui_print("storage set to /data/media/0\n");
                     }
@@ -1660,14 +1765,26 @@ int show_advanced_menu() {
                 }
                 break;
             }
+            default:
+#ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
+            if (chosen_item == index_tdb) {
+                device_toggle_truedualboot();
+                break;
+            }
+            if (chosen_item == index_bootmode) {
+                device_choose_bootmode();
+                break;
+            }
+#endif
+
 #ifdef ENABLE_LOKI
-            case 5:
+            if (chosen_item == index_loki) {
                 toggle_loki_support();
                 break;
+            }
 #endif
-            default:
-                partition_sdcard(list[chosen_item] + strlen(list_prefix));
-                break;
+            partition_sdcard(list[chosen_item] + strlen(list_prefix));
+            break;
         }
     }
 
@@ -1742,6 +1859,10 @@ int bml_check_volume(const char *path) {
     return ret == 0 ? 1 : 0;
 }
 
+// at this stage, unless a ramdisk command mounted something, all partitions are unmounted
+// we need to mount /data so that setup_data_media() can stat /data/media/0
+// load_volume_table() was already called at this stage, so we can use ensure_path_mounted()
+// ensure_path_unmounted("/data") won't work for /data/media devices
 void process_volumes() {
     create_fstab();
 
@@ -1857,10 +1978,6 @@ int verify_root_and_recovery() {
     if (ensure_path_mounted("/system") != 0)
         return 0;
 
-    // none of these options should get a "Go Back" option
-    int old_val = ui_get_showing_back_button();
-    ui_set_showing_back_button(0);
-
     int ret = 0;
     struct stat st;
     // check to see if install-recovery.sh is going to clobber recovery
@@ -1890,11 +2007,13 @@ int verify_root_and_recovery() {
     if (atoi(value) >= 18)
         needs_suid = 0;
 
-    int exists = 0;
+    int exists = 0; // su exists, regular file or symlink
+    int su_nums = 0; // su bin as regular file, not symlink
     if (0 == lstat("/system/bin/su", &st)) {
         exists = 1;
-        if (needs_suid && S_ISREG(st.st_mode)) {
-            if ((st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
+        if (S_ISREG(st.st_mode)) {
+            su_nums += 1;
+            if (needs_suid && (st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
                 ui_show_text(1);
                 if (confirm_selection("Root access possibly lost. Fix?", "Yes - Fix root (/system/bin/su)")) {
                     __system("chmod 6755 /system/bin/su");
@@ -1906,8 +2025,9 @@ int verify_root_and_recovery() {
 
     if (0 == lstat("/system/xbin/su", &st)) {
         exists = 1;
-        if (needs_suid && S_ISREG(st.st_mode)) {
-            if ((st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
+        if (S_ISREG(st.st_mode)) {
+            su_nums += 1;
+            if (needs_suid && (st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
                 ui_show_text(1);
                 if (confirm_selection("Root access possibly lost. Fix?", "Yes - Fix root (/system/xbin/su)")) {
                     __system("chmod 6755 /system/xbin/su");
@@ -1917,15 +2037,15 @@ int verify_root_and_recovery() {
         }
     }
 
-    if (!exists) {
+    // If we have no root (exists == 0) or we have two su instances (exists == 2), prompt to properly root the device
+    if (!exists || su_nums != 1) {
         ui_show_text(1);
-        if (confirm_selection("Root access is missing. Root device?", "Yes - Root device (/system/xbin/su)")) {
+        if (confirm_selection("Root access is missing/broken. Root device?", "Yes - Apply root (/system/xbin/su)")) {
             __system("/sbin/install-su.sh");
             ret = 2;
         }
     }
 
     ensure_path_unmounted("/system");
-    ui_set_showing_back_button(old_val);
     return ret;
 }
