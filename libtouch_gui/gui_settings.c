@@ -198,6 +198,7 @@ int force_wait = -1;
 int key_gesture = 0;
 
 void selective_load_theme_settings() {
+#ifndef USE_CHINESE_FONT
     const char* header_choose[] = {
         "Select a theme to load",
         "",
@@ -215,6 +216,25 @@ void selective_load_theme_settings() {
         "Load only GUI settings",
         NULL
     };
+#else
+    const char* header_choose[] = {
+        "选择一个主题来加载",
+        "",
+        NULL
+    };
+
+    const char* headers[] = {
+        "选择设置来加载主题",
+        "",
+        NULL
+    };
+
+    char* list[] = {
+        "加载所有recovery设置",
+        "只加载GUI设置",
+        NULL
+    };
+#endif
 
     char themes_dir[PATH_MAX];
     char* theme_file;
@@ -234,12 +254,20 @@ void selective_load_theme_settings() {
 
         switch (chosen_item) {
             case 0: {
+#ifndef USE_CHINESE_FONT
                 if (confirm_selection("Overwrite all settings ?", "Yes - Apply New Theme") && copy_a_file(theme_file, PHILZ_SETTINGS_FILE) == 0) {
+#else
+                if (confirm_selection("覆盖所有设置？", "是 - 应用新主题") && copy_a_file(theme_file, PHILZ_SETTINGS_FILE) == 0) {
+#endif
                     char settings_copy[PATH_MAX];
                     sprintf(settings_copy, "%s/%s", get_primary_storage_path(), PHILZ_SETTINGS_FILE2);
                     copy_a_file(theme_file, settings_copy);
                     refresh_recovery_settings(0);
+#ifndef USE_CHINESE_FONT
                     ui_print("loaded default settings from %s\n", BaseName(theme_file));
+#else
+                    ui_print("从%s加载默认主题\n", BaseName(theme_file));
+#endif
                 }
                 break;
             }
@@ -257,7 +285,11 @@ void selective_load_theme_settings() {
                     write_config_file(PHILZ_SETTINGS_FILE, gui_settings[i], value);
                 }
                 refresh_recovery_settings(0);
+#ifndef USE_CHINESE_FONT
                 ui_print("loaded default settings from %s\n", BaseName(theme_file));
+#else
+                ui_print("从%s加载默认设置\n", BaseName(theme_file));
+#endif
                 break;
             }
         }
@@ -769,10 +801,17 @@ static void load_qcom_time_daemon(int on_start) {
         ensure_path_unmounted("/data");
     } else {
         // at this point, if on_start, show_text == 0 and the log prints are not shown on screen
+#ifndef USE_CHINESE_FONT
         if (on_start)
             draw_visible_text_line(5, "starting time daemon...", 1);
         else
             ui_print("starting time daemon...\n");
+#else
+        if (on_start)
+            draw_visible_text_line(5, "正在启动时间守护...", 1);
+        else
+            ui_print("正在启动时间守护...\n");
+#endif
 
         char cmd[PATH_MAX];
         sprintf(cmd, "export LD_LIBRARY_PATH=/system/vendor/lib:/system/lib; /system/bin/time_daemon &(sleep 2; killall time_daemon;%s) &",
@@ -1231,7 +1270,11 @@ static void choose_background_image(const char* sd_path) {
         return;
     }
 
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {"Choose a background image.", NULL};
+#else
+    const char* headers[] = {"选择一个背景图片。", NULL};
+#endif
 
     char tmp[PATH_MAX];
     //tariling / previously needed for choose_file_menu()
@@ -1240,7 +1283,11 @@ static void choose_background_image(const char* sd_path) {
     if (file == NULL) {
         //either no valid files found or we selected no files by pressing back menu
         if (no_files_found)
+#ifndef USE_CHINESE_FONT
             ui_print("No .png images in %s\n", tmp);
+#else
+            ui_print("在%s没有.png图片\n", tmp);
+#endif
         return;
     }
 
@@ -1253,16 +1300,31 @@ static void browse_background_image() {
     char** extra_paths = get_extra_storage_paths();
     int num_extra_volumes = get_num_extra_volumes();
 
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {"Choose an image or color", "", NULL};
+#else
+    const char* headers[] = {"选择一张图片或一种颜色", "", NULL};
+#endif
     int list_top_items = 5;
+#ifndef USE_CHINESE_FONT
     char list_prefix[] = "Image from ";
+#else
+    char list_prefix[] = "图片 ";
+#endif
     char* list[MAX_NUM_MANAGED_VOLUMES + list_top_items + 1];
     char buf[80];
     memset(list, 0, MAX_NUM_MANAGED_VOLUMES + list_top_items + 1);
+#ifndef USE_CHINESE_FONT
     list[0] = "Solid Color Background";
     list[1] = "Reset Koush Background";
     list[2] = "Reset PhilZ Touch Background";
     list[3] = "Toggle Background Icon";
+#else
+    list[0] = "纯色背景";
+    list[1] = "重置到Koush背景";
+    list[2] = "重置到PhilZ Touch背景";
+    list[3] = "开关背景图标";
+#endif
     sprintf(buf, "%s%s", list_prefix, primary_path);
     list[4] = strdup(buf);
 
@@ -1298,7 +1360,11 @@ static void browse_background_image() {
                 break;
             case 2:
                 write_config_file(PHILZ_SETTINGS_FILE, background_image.key, "default");
+#ifndef USE_CHINESE_FONT
                 ui_print("Restart to load PhilZ Touch default background!\n");
+#else
+                ui_print("重启以加载PhilZ Touch默认背景！\n");
+#endif
                 break;
             case 3:
                 show_background_icon.value ^= 1;
@@ -1373,6 +1439,7 @@ void refresh_touch_gui_settings(int on_start) {
 //-------- End GUI Preferences functions
 
 //start show GUI Preferences menu
+#ifndef USE_CHINESE_FONT
 static void change_menu_color() {
     const char* headers[] = {  "Change Menu Colors",
                                 NULL
@@ -1390,6 +1457,25 @@ static void change_menu_color() {
                             "Change Battery and Clock Color",
                             NULL
     };
+#else
+static void change_menu_color() {
+    const char* headers[] = {  "修改菜单颜色",
+                                NULL
+    };
+
+    char* list[] = { "修改菜单文字颜色",
+                            "修改菜单背景颜色",
+                            "修改菜单背景透明度",
+                            "修改菜单高亮颜色",
+                            "修改菜单高亮透明度",
+                            "修改菜单分界线颜色",
+                            "修改菜单分界线透明度",
+                            "修改日志和输出颜色",
+                            "修改头部文字颜色",
+                            "修改电量和时间颜色",
+                            NULL
+    };
+#endif
 
     for (;;) {
         int chosen_item = get_menu_selection(headers, list, 0, 0);
@@ -1469,7 +1555,11 @@ static void change_menu_color() {
 // prefer second storage paths first, then primary storage
 static void fb2png_shot() {
     if (!libtouch_flags.board_use_fb2png) {
+#ifndef USE_CHINESE_FONT
         ui_print("fb2png not supported on this device!\n");
+#else
+        ui_print("fb2png不支持这个设备！\n");
+#endif
         return;
     }
 
@@ -1491,7 +1581,11 @@ static void fb2png_shot() {
         sd_path = get_primary_storage_path();
 
     if (ensure_path_mounted(sd_path) != 0) {
+#ifndef USE_CHINESE_FONT
         ui_print("Found no mountable storage to save screen shots.\n");
+#else
+        ui_print("没有找到可挂载的存储器来保存截图。\n");
+#endif
         return;
     }
 
@@ -1517,12 +1611,20 @@ static void fb2png_shot() {
     ensure_directory(dirtmp);
     sprintf(tmp, "fb2png %s/%s/cwm_screen%03ld.png", sd_path, SCREEN_CAPTURE_FOLDER, file_num);
     if (0 == __system(tmp)) {
+#ifndef USE_CHINESE_FONT
         ui_print("screen shot: %s\n", tmp + 7); // strlen("fb2png ")
+#else
+        ui_print("屏幕截图：%s\n", tmp + 7); // strlen("fb2png ")
+#endif
         sprintf(tmp, "%s/%s/index", sd_path, SCREEN_CAPTURE_FOLDER);
         sprintf(line, "%ld", file_num);
         write_string_to_file(tmp, line);
     } else {
+#ifndef USE_CHINESE_FONT
         ui_print("screen capture failed\n");
+#else
+        ui_print("屏幕截图失败\n");
+#endif
     }
 }
 
@@ -1579,9 +1681,15 @@ void handle_gesture_actions(const char** headers, char** items, int initial_sele
 }
 
 static void gestures_action_setup() {
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {  "Gesture Action Setup",
                                 NULL
     };
+#else
+    const char* headers[] = {  "手势设置",
+                                NULL
+    };
+#endif
 
     char item_slide_left[MENU_MAX_COLS];
     char item_slide_right[MENU_MAX_COLS];
@@ -1597,6 +1705,7 @@ static void gestures_action_setup() {
                     NULL
     };
 
+#ifndef USE_CHINESE_FONT
     char* gesture_action[] = { "disabled",
                                       "screen shot", 
                                       "aroma browser",
@@ -1605,9 +1714,20 @@ static void gestures_action_setup() {
                                       "toggle screen",
                                       NULL
     };
+#else
+    char* gesture_action[] = { "关闭",
+                                      "截图", 
+                                      "aroma浏览器",
+                                      "亮度设置",
+                                      "显示日志",
+                                      "关闭屏幕",
+                                      NULL
+    };
+#endif
 
     for (;;) {
         int i = 0;
+#ifndef USE_CHINESE_FONT
         while (gesture_action[i] != NULL) {
             ui_format_gui_menu(item_slide_left, "Slide Left", gesture_action[slide_left_action.value]);
             ui_format_gui_menu(item_slide_right, "Slide Right", gesture_action[slide_right_action.value]);
@@ -1616,6 +1736,16 @@ static void gestures_action_setup() {
             ui_format_gui_menu(item_press_move, "Press/Move", gesture_action[press_move_action.value]);
             i++;
         }
+#else
+        while (gesture_action[i] != NULL) {
+            ui_format_gui_menu(item_slide_left, "左滑", gesture_action[slide_left_action.value]);
+            ui_format_gui_menu(item_slide_right, "右滑", gesture_action[slide_right_action.value]);
+            ui_format_gui_menu(item_double_tap, "双击", gesture_action[double_tap_action.value]);
+            ui_format_gui_menu(item_press_lift, "按压/抬手", gesture_action[press_lift_action.value]);
+            ui_format_gui_menu(item_press_move, "按压/移动", gesture_action[press_move_action.value]);
+            i++;
+        }
+#endif
 
         int chosen_item = get_menu_selection(headers, list, 0, 0);
         if (chosen_item == GO_BACK)
@@ -1684,7 +1814,11 @@ static void gestures_action_setup() {
 
 // set time zone
 static void time_zone_h_menu() {
+#ifndef USE_CHINESE_FONT
     const char* headers[] = { "Select Time Zone", NULL };
+#else
+    const char* headers[] = { "选择时区", NULL };
+#endif
 
     char* list[] = {
         "(UTC -11) Samoa, Midway Island",
@@ -1833,10 +1967,18 @@ static void change_date_time_menu() {
     char item_qcom_time_offset[MENU_MAX_COLS];
 
     char chosen_date[MENU_MAX_COLS] = "";
+#ifndef USE_CHINESE_FONT
     const char* headers[] = { "Change date and time:", chosen_date, "", NULL };
+#else
+    const char* headers[] = { "修改日期和时间：", chosen_date, "", NULL };
+#endif
 
     char* list[] = {
+#ifndef USE_CHINESE_FONT
         ">> Validate Chosen Date",
+#else
+        ">> 验证所选日期",
+#endif
         item_increase,
         item_decrease,
         item_next,
@@ -1849,7 +1991,11 @@ static void change_date_time_menu() {
     };
 
     char value[15];
+#ifndef USE_CHINESE_FONT
     char* date_elements[] = { "year", "month", "day", "hour", "minutes", "seconds" };
+#else
+    char* date_elements[] = { "年", "月", "日", "时", "分", "秒" };
+#endif
     int force_system_date = 0;
     int current = 0;
     int next = 0;
@@ -1864,6 +2010,7 @@ static void change_date_time_menu() {
         strftime(chosen_date, sizeof(chosen_date), "--> %Y-%m-%d %H:%M:%S", &new_date);
 
         // update "toggle use of date -s" menu
+#ifndef USE_CHINESE_FONT
         if (force_system_date) ui_format_gui_menu(item_force_system_date, "Try Force Persist on Reboot", "(x)");
         else ui_format_gui_menu(item_force_system_date, "Try Force Persist on Reboot", "( )");
 
@@ -1884,6 +2031,28 @@ static void change_date_time_menu() {
         // update increase and decrease menus
         sprintf(item_increase, "Time + (%s)", date_elements[current]);
         sprintf(item_decrease, "Time - (%s)", date_elements[current]);
+#else
+        if (force_system_date) ui_format_gui_menu(item_force_system_date, "重启时尝试强制保持", "(x)");
+        else ui_format_gui_menu(item_force_system_date, "重启时尝试强制保持", "( )");
+
+        // qcom devices: try to directly parse the /data/time contents
+        if (use_qcom_time_data_files.value) ui_format_gui_menu(item_parse_time_daemon_data_files, "解析时间守护进程数据", "(x)");
+        else ui_format_gui_menu(item_parse_time_daemon_data_files, "解析时间守护进程数据", "( )");
+
+        // menu to toggle load of time_daemon
+        if (use_qcom_time_daemon.value)
+            ui_format_gui_menu(item_qcom_time_daemon, "高通时间守护进程", "(x)");
+        else ui_format_gui_menu(item_qcom_time_daemon, "高通时间守护进程", "( )");
+
+        // menu to toggle use of time offset
+        if (use_qcom_time_offset.value != 0)
+            ui_format_gui_menu(item_qcom_time_offset, "使用RTC时间偏移...", "(x)");
+        else ui_format_gui_menu(item_qcom_time_offset, "使用RTC时间偏移...", "( )");
+
+        // update increase and decrease menus
+        sprintf(item_increase, "时间 + (%s)", date_elements[current]);
+        sprintf(item_decrease, "时间 - (%s)", date_elements[current]);
+#endif
 
         // update next and previous menu list
         next = current + 1;
@@ -1954,7 +2123,11 @@ static void change_date_time_menu() {
 
             if (ret == 0) {
                 strftime(chosen_date, sizeof(chosen_date), "--> %Y-%m-%d %H:%M:%S", &new_date);
+#ifndef USE_CHINESE_FONT
                 ui_print("New date: %s\n", chosen_date);
+#else
+                ui_print("新日期：%s\n", chosen_date);
+#endif
             } else {
                 LOGE("Failed to set new time!\n");
             }
@@ -1963,12 +2136,21 @@ static void change_date_time_menu() {
             // toggle force use of date -s command
             force_system_date ^= 1;
         } else if (chosen_item == CHANGE_TIME_MENU_T_DAEMON_DATA) {
+#ifndef USE_CHINESE_FONT
             const char* qcom_headers[] = {
                 "Apply time daemon data:",
                 "Use Only for Qualcom boards",
                 NULL
             };
             char* qcom_list[] = { "Yes - Apply Time Daemon Data", NULL };
+#else
+            const char* qcom_headers[] = {
+                "应用时间守护数据：",
+                "仅为高通设备使用",
+                NULL
+            };
+            char* qcom_list[] = { "是 - 应用时间守护数据", NULL };
+#endif
             struct timeval tv;
 
             // only allow one qcom time fix: time daemon, rtc offset or parse of time data files
@@ -1996,8 +2178,13 @@ static void change_date_time_menu() {
                 tv.tv_sec = 0;
                 tv.tv_usec = 0;
                 settimeofday(&tv, NULL);
+#ifndef USE_CHINESE_FONT
                 ui_print("If time is wrong,\n");
                 ui_print("reboot to system & sync time\n");
+#else
+                ui_print("如果时间错误，\n");
+                ui_print("重启到系统 & 同步时间\n");
+#endif
             }
             apply_qcom_time_daemon_fixes(0);
 
@@ -2005,8 +2192,13 @@ static void change_date_time_menu() {
             new_date_secs = time(NULL);
             localtime_r(&new_date_secs, &new_date);
         } else if (chosen_item == CHANGE_TIME_MENU_T_DAEMON_LOAD) {
+#ifndef USE_CHINESE_FONT
             const char* qcom_headers[] = { "Load time daemon:", "Use Only for Qualcom boards", "And if all manual modes fail", NULL };
             char* qcom_list[] = { "Yes - Load Time Daemon", NULL };
+#else
+            const char* qcom_headers[] = { "加载时间守护：", "仅为高通设备使用", "如果所有的手动模式失败", NULL };
+            char* qcom_list[] = { "是 - 加载时间守护", NULL };
+#endif
 
             // only allow one qcom time fix: time daemon, rtc offset or parse of time data files
             if (!use_qcom_time_daemon.value && use_qcom_time_offset.value != 0) {
@@ -2035,8 +2227,13 @@ static void change_date_time_menu() {
             // if user has a ROM that doesn't properly support time_daemon, it will need this trick
             // also this could be used if recovery is missing some selinux permissions to load time_daemon
             // we only allow use of one method: time daemon, parse time daemon data files or time offset
+#ifndef USE_CHINESE_FONT
             const char* qcom_headers[] = { "Use time offset:", "Use Only for Qualcom boards", "And if all other modes fail", NULL };
             char* qcom_list[] = { "Yes - Enable Time Offset", NULL };
+#else
+            const char* qcom_headers[] = { "使用时间偏移：", "仅为高通设备使用", "如果其他所有模式都失败", NULL };
+            char* qcom_list[] = { "是 - 打开时间偏移", NULL };
+#endif
             if (use_qcom_time_offset.value == 0 && use_qcom_time_daemon.value) {
                 LOGE("first, disable Qcom Time Daemon\n");
                 continue;
@@ -2053,7 +2250,11 @@ static void change_date_time_menu() {
                 use_qcom_time_offset.value = 0;
             } else {
                 use_qcom_time_offset.value = 1;
+#ifndef USE_CHINESE_FONT
                 ui_print(">> Now set date and validate\n");
+#else
+                ui_print(">> 现在设置日期并且验证\n");
+#endif
             }
             sprintf(value, "%ld", use_qcom_time_offset.value);
             write_config_file(PHILZ_SETTINGS_FILE, use_qcom_time_offset.key, value);
@@ -2120,7 +2321,11 @@ static void change_date_time_menu() {
 }
 
 static void show_time_settings_menu() {
+#ifndef USE_CHINESE_FONT
     const char* headers[] = { "Time settings", NULL };
+#else
+    const char* headers[] = { "时间设置", NULL };
+#endif
 
     char item_timezone_h[MENU_MAX_COLS];
     char item_timezone_m[MENU_MAX_COLS];
@@ -2129,7 +2334,11 @@ static void show_time_settings_menu() {
         item_timezone_h,
         item_timezone_m,
         item_dst,
+#ifndef USE_CHINESE_FONT
         "Change Date and Time",
+#else
+        "修改日期和时间",
+#endif
         NULL
     };
 
@@ -2146,6 +2355,7 @@ static void show_time_settings_menu() {
         } else {
             sprintf(tmp, "--:--");
         }
+#ifndef USE_CHINESE_FONT
         ui_format_gui_menu(item_timezone_h, "Time Zone:", tmp);
 
         sprintf(tmp, "+%ld mn", t_zone_offset.value);
@@ -2154,6 +2364,16 @@ static void show_time_settings_menu() {
         if (use_dst_time.value)
             ui_format_gui_menu(item_dst, "Day Light Saving Time", "(x)");
         else ui_format_gui_menu(item_dst, "Day Light Saving Time", "( )");
+#else
+        ui_format_gui_menu(item_timezone_h, "时区：", tmp);
+
+        sprintf(tmp, "+%ld mn", t_zone_offset.value);
+        ui_format_gui_menu(item_timezone_m, "时区偏移", tmp);
+
+        if (use_dst_time.value)
+            ui_format_gui_menu(item_dst, "白天节约时间", "(x)");
+        else ui_format_gui_menu(item_dst, "白天节约时间", "( )");
+#endif
 
         int chosen_item = get_menu_selection(headers, list, 0, 0);
         if (chosen_item == GO_BACK)
@@ -2191,7 +2411,11 @@ static void show_time_settings_menu() {
 // end check time zone
 
 void show_touch_gui_menu() {
+#ifndef USE_CHINESE_FONT
     const char* headers[] = { "Touch GUI Setup", NULL };
+#else
+    const char* headers[] = { "Touch GUI设置", NULL };
+#endif
 
     char item_touch[MENU_MAX_COLS];
     char item_height[MENU_MAX_COLS];
@@ -2223,16 +2447,24 @@ void show_touch_gui_menu() {
         item_blank_time,
         item_batt_clock,
         item_time_settings,
+#ifndef USE_CHINESE_FONT
         "Change Background",
         "Change Menu Colors",
         "Toggle Virtual Keys",
         "Gestures Action Setup",
+#else
+        "修改背景",
+        "修改菜单颜色",
+        "开关虚拟键",
+        "手势设置",
+#endif
         NULL
     };
 
     char tmp[MENU_MAX_COLS];
     for (;;) {
         if (touch_to_validate.value == NO_TOUCH_SUPPORT)
+#ifndef USE_CHINESE_FONT
             ui_format_gui_menu(item_touch, "Touch GUI", "Disabled");
         else if (touch_to_validate.value == TOUCH_HIGHLIGHT_ONLY)
             ui_format_gui_menu(item_touch, "Touch GUI", "Select only");
@@ -2299,6 +2531,74 @@ void show_touch_gui_menu() {
         else if (show_battery.value)
             ui_format_gui_menu(item_batt_clock, "Battery/Clock", "Battery");
         else ui_format_gui_menu(item_batt_clock, "Battery/Clock", "Disabled");
+#else
+            ui_format_gui_menu(item_touch, "Touch GUI", "关闭");
+        else if (touch_to_validate.value == TOUCH_HIGHLIGHT_ONLY)
+            ui_format_gui_menu(item_touch, "Touch GUI", "仅选择");
+        else if (touch_to_validate.value == DOUBLE_TAP_VALIDATION)
+            ui_format_gui_menu(item_touch, "Touch GUI", "双击");
+        else
+            ui_format_gui_menu(item_touch, "Touch GUI", "所有");
+
+        if (menu_height_increase.value == MENU_HEIGHT_INCREASE_0)
+            sprintf(tmp, "%ld（默认）", menu_height_increase.value);
+        else sprintf(tmp, "%ld（自定义）", menu_height_increase.value);
+        ui_format_gui_menu(item_height, "菜单高度", tmp);
+
+        if (scroll_sensitivity.value == SCROLL_SENSITIVITY_0)
+            sprintf(tmp, "%ld（默认）", scroll_sensitivity.value);
+        else sprintf(tmp, "%ld（自定义）", scroll_sensitivity.value);
+        ui_format_gui_menu(item_scroll, "滚动灵敏度", tmp);
+
+        if (touch_accuracy.value == TOUCH_ACCURACY_0)
+            sprintf(tmp, "%ld（默认）", touch_accuracy.value);
+        else sprintf(tmp, "%ld（自定义）", touch_accuracy.value);
+        ui_format_gui_menu(item_sens, "触摸精度", tmp);
+
+        if (enable_vibrator.value)
+            ui_format_gui_menu(item_vibra, "振动器", "打开");
+        else ui_format_gui_menu(item_vibra, "振动器", "关闭");
+
+        if (boardEnableKeyRepeat.value)
+            ui_format_gui_menu(item_keyrep, "按键反馈", "打开");
+        else ui_format_gui_menu(item_keyrep, "按键反馈", "关闭");
+
+        if (show_menu_separation.value)
+            ui_format_gui_menu(item_separator, "菜单分隔符", "打开");
+        else ui_format_gui_menu(item_separator, "菜单分隔符", "关闭");
+
+        if (wait_after_install.value)
+            ui_format_gui_menu(item_pauseLog, "日志暂停", "打开");
+        else ui_format_gui_menu(item_pauseLog, "日志暂停", "关闭");
+
+        if (min_log_rows.value == 3) //defined by MIN_LOG_ROWS in ui.c
+            sprintf(tmp, "%ld（默认）", min_log_rows.value);
+        else sprintf(tmp, "%ld（自定义）", min_log_rows.value);
+        ui_format_gui_menu(item_logrows, "设置日志行", tmp);
+
+        if (set_brightness.value == BRIGHTNESS_DEFAULT_VALUE)
+            sprintf(tmp, "%ld（默认）", set_brightness.value);
+        else sprintf(tmp, "%ld", set_brightness.value);
+        ui_format_gui_menu(item_brightness, "设置亮度", tmp);
+
+        if (dim_timeout.value == 0)
+            sprintf(tmp, "0（关闭）");
+        else sprintf(tmp, "%ld mn", dim_timeout.value / 60);
+        ui_format_gui_menu(item_dim_time, "暗屏延迟", tmp);
+
+        if (blank_timeout.value == 0)
+            sprintf(tmp, "0（关闭）");
+        else sprintf(tmp, "%ld mn", blank_timeout.value / 60);
+        ui_format_gui_menu(item_blank_time, "关屏延迟", tmp);
+
+        if (show_clock.value && show_battery.value)
+            ui_format_gui_menu(item_batt_clock, "电量/时钟", "同时打开");
+        else if (show_clock.value)
+            ui_format_gui_menu(item_batt_clock, "电量/时钟", "仅时钟");
+        else if (show_battery.value)
+            ui_format_gui_menu(item_batt_clock, "电量/时钟", "仅电量");
+        else ui_format_gui_menu(item_batt_clock, "电量/时钟", "关闭");
+#endif
 
         // show current timezone and time in menu
         struct tm *timeptr;
@@ -2311,7 +2611,11 @@ void show_touch_gui_menu() {
         } else {
             sprintf(tmp, "--:--");
         }
+#ifndef USE_CHINESE_FONT
         ui_format_gui_menu(item_time_settings, "Time Setup:", tmp);
+#else
+        ui_format_gui_menu(item_time_settings, "时间设置：", tmp);
+#endif
 
         int chosen_item = get_menu_selection(headers, list, 0, 0);
         if (chosen_item == GO_BACK)
@@ -2429,7 +2733,11 @@ void show_touch_gui_menu() {
                     sprintf(value, "%ld", min_log_rows.value);
                     write_config_file(PHILZ_SETTINGS_FILE, min_log_rows.key, value);
                     fast_ui_init();
+#ifndef USE_CHINESE_FONT
                     ui_print("Reserved %ld log rows.\n", min_log_rows.value);
+#else
+                    ui_print("保留了%ld行日志。\n", min_log_rows.value);
+#endif
                 }
                 break;
             case 9:
@@ -2577,12 +2885,20 @@ static int rom_zip_wrapper(const char* backup_path) {
     sprintf(tmp, "cd %s; (zip -r ../custom_rom_$(date +%%Y%%m%%d_%%H%%M%%S).zip *) 2> /proc/self/fd/1 ; exit $?", backup_path);
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute zip.\n");
+#else
+        ui_print("无法运行zip。\n");
+#endif
         return -1;
     }
 
     ui_clear_key_queue();
+#ifndef USE_CHINESE_FONT
     ui_print("Press Back to cancel.\n \n");
+#else
+    ui_print("按返回键取消。\n \n");
+#endif
     // support dim screen durin zip operation
     struct timeval now;
     time_t last_key_ev;
@@ -2601,7 +2917,11 @@ static int rom_zip_wrapper(const char* backup_path) {
 
             // support cancel nandroid tar backup
             if (key_event == GO_BACK) {
+#ifndef USE_CHINESE_FONT
             ui_print("Cancelling custom rom job...\n");
+#else
+            ui_print("正在取消自定义刷机包工作...\n");
+#endif
             ui_clear_key_queue();
             __pclose(fp);
             sync();
@@ -2620,14 +2940,22 @@ static int rom_zip_wrapper(const char* backup_path) {
 
 static int make_update_zip(const char* source_path, const char* target_volume) {
     if (ensure_path_mounted(target_volume) != 0) {
+#ifndef USE_CHINESE_FONT
         ui_print("Can't mount %s\n", target_volume);
+#else
+        ui_print("无法挂载%s\n", target_volume);
+#endif
         return -1;
     }
     int ret = 0;
     char tmp_path[PATH_MAX];
     sprintf(tmp_path, "%s/%s/tmp", target_volume, CUSTOM_ROM_PATH);
 
+#ifndef USE_CHINESE_FONT
     ui_print("\nPreparing ROM structure...\n");
+#else
+    ui_print("\n正在准备刷机包框架...\n");
+#endif
     char cmd[PATH_MAX];
     sprintf(cmd, "rm -rf %s", tmp_path);
     __system(cmd);
@@ -2658,7 +2986,11 @@ static int make_update_zip(const char* source_path, const char* target_volume) {
     __system(cmd);
 
     ui_set_background(BACKGROUND_ICON_INSTALLING);
+#ifndef USE_CHINESE_FONT
     ui_print("\nCreating update.zip....\n");
+#else
+    ui_print("\n正在生成update.zip....\n");
+#endif
     get_directory_stats(tmp_path);
     ensure_path_mounted("/system"); // zip is a dynamic binary!
     ret = rom_zip_wrapper(tmp_path);
@@ -2675,11 +3007,19 @@ static int make_update_zip(const char* source_path, const char* target_volume) {
     __system(cmd);
 
     if (0 != ret) {
+#ifndef USE_CHINESE_FONT
         return print_and_error("Error while making a zip image!\n", ret);
+#else
+        return print_and_error("生成zip镜像时出错！\n", ret);
+#endif
     }
 
     finish_nandroid_job();
+#ifndef USE_CHINESE_FONT
     ui_print("Custom ROM saved in %s/%s\n", target_volume, CUSTOM_ROM_PATH);
+#else
+    ui_print("自定义刷机包保存到%s/%s\n", target_volume, CUSTOM_ROM_PATH);
+#endif
     return 0;
 }
 
@@ -2689,9 +3029,17 @@ static void custom_rom_target_volume(const char* source_path) {
     char** extra_paths = get_extra_storage_paths();
     int num_extra_volumes = get_num_extra_volumes();
 
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {"Choose custom ROM target", "", NULL};
+#else
+    const char* headers[] = {"选择自定义刷机包目标", "", NULL};
+#endif
     char* list[MAX_NUM_MANAGED_VOLUMES + 1];
+#ifndef USE_CHINESE_FONT
     char list_prefix[] = "Create ROM in ";
+#else
+    char list_prefix[] = "把刷机包创建在";
+#endif
     char buf[80];
     memset(list, 0, MAX_NUM_MANAGED_VOLUMES + 1);
     sprintf(buf, "%s%s", list_prefix, primary_path);
@@ -2723,14 +3071,27 @@ static void choose_nandroid_menu() {
     char** extra_paths = get_extra_storage_paths();
     int num_extra_volumes = get_num_extra_volumes();
 
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {
         "Choose a nandroid backup",
         "to export",
         "",
         NULL
     };
+#else
+    const char* headers[] = {
+        "选择一个nandroid备份",
+        "来输出",
+        "",
+        NULL
+    };
+#endif
     char* list[MAX_NUM_MANAGED_VOLUMES + 1];
+#ifndef USE_CHINESE_FONT
     char list_prefix[] = "Choose from ";
+#else
+    char list_prefix[] = "选择 ";
+#endif
     char buf[80];
     memset(list, 0, MAX_NUM_MANAGED_VOLUMES + 1);
     sprintf(buf, "%s%s", list_prefix, primary_path);
@@ -2750,7 +3111,11 @@ static void choose_nandroid_menu() {
         goto out;
         
     if (ensure_path_mounted(list[chosen_item] + strlen(list_prefix)) != 0) {
+#ifndef USE_CHINESE_FONT
         ui_print("Can't mount %s\n", list[chosen_item] + strlen(list_prefix));
+#else
+        ui_print("无法挂载%s\n", list[chosen_item] + strlen(list_prefix));
+#endif
         goto out;
     }
 
@@ -2766,8 +3131,13 @@ static void choose_nandroid_menu() {
     if (!file_found(tmp)) {
         LOGE("Backup must be in tar format!\n");
     } else {
+#ifndef USE_CHINESE_FONT
         sprintf(tmp, "Yes - Create using %s", BaseName(file));
         if (confirm_selection("Confirm Create ROM?", tmp))
+#else
+        sprintf(tmp, "是 - 使用%s来创建", BaseName(file));
+        if (confirm_selection("确认创建刷机包？", tmp))
+#endif
             custom_rom_target_volume(file);
     }
 
@@ -2783,6 +3153,7 @@ out:
 
 //start Clone ROM to update.zip menu
 void custom_rom_menu() {
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {
         "Create Custom ROM",
         "",
@@ -2795,6 +3166,20 @@ void custom_rom_menu() {
         "Settings...",
         NULL
     };
+#else
+    const char* headers[] = {
+        "创建一个自定义刷机包",
+        "",
+        NULL
+    };
+
+    char* list[] = {
+        "从当前ROM创建",
+        "从以前的备份创建",
+        "设置...",
+        NULL
+    };
+#endif
 
     is_custom_backup = 1;
     for (;;) {
@@ -2848,7 +3233,11 @@ static void recovery_change_passkey() {
     for (i = 0; i < RECOVERY_LOCK_MAX_CHARS; ++i) {
         char tmp[64];
         ui_update_screen(); // remove previous drawing
+#ifndef USE_CHINESE_FONT
         draw_visible_text_line(2, "* New Passkey (6 chars) *", 1);
+#else
+        draw_visible_text_line(2, "* 新密码（6个字符） *", 1);
+#endif
         draw_visible_text_line(4, pass_display, 1);
         while (1) {
             pass_key[i] = ui_wait_key();
@@ -2866,7 +3255,11 @@ static void recovery_change_passkey() {
     ui_clear_key_queue();
     for (i = 0; i < RECOVERY_LOCK_MAX_CHARS; ++i) {
         ui_update_screen();
+#ifndef USE_CHINESE_FONT
         draw_visible_text_line(2, "* Retype Passkey *", 1);
+#else
+        draw_visible_text_line(2, "* 重新输入密码 *", 1);
+#endif
         draw_visible_text_line(4, pass_display, 1);
 
         int input_key;
@@ -2879,8 +3272,13 @@ static void recovery_change_passkey() {
         if (input_key != pass_key[i]) {
             key_match = 0;
             LOGE("Passkey doesn't match\n"); // will remove any previous drawing (actual ui_print will show on returning to menu)
+#ifndef USE_CHINESE_FONT
             draw_visible_text_line(2, "* Passkey mismatch! *", 1);
             draw_visible_text_line(4, "Press a key to exit", 1);
+#else
+            draw_visible_text_line(2, "* 密码不符！ *", 1);
+            draw_visible_text_line(4, "按任意键退出", 1);
+#endif
             ui_clear_key_queue();
             ui_wait_key();
             break;
@@ -2892,7 +3290,11 @@ static void recovery_change_passkey() {
     // if passkey was entered twice correctly, save to lock file
     if (key_match) {
         write_string_to_file(RECOVERY_LOCK_FILE, pass_string);
+#ifndef USE_CHINESE_FONT
         ui_print("Recovery Lock is enabled\n");
+#else
+        ui_print("Recovery锁已经启动\n");
+#endif
     }
 
     ui_SetShowText(true);
@@ -2969,14 +3371,23 @@ void check_recovery_lock() {
 
     // workaround to refresh display buffers with active background
     // this is needed to avoid first passkey prompt screen background to be black on recovery start
+#ifndef USE_CHINESE_FONT
     draw_visible_text_line(2, "* Recovery Locked *", 1);
+#else
+    draw_visible_text_line(2, "* Recovery已上锁 *", 1);
+#endif
     ui_update_screen(); // will wipe above text line and properly refresh the buffers
 
     while (key_err < RECOVERY_LOCK_MAX_ERROR) {
         // prompt for the key
         for (i = 0; i < RECOVERY_LOCK_MAX_CHARS; ++i) {
+#ifndef USE_CHINESE_FONT
             sprintf(trials_left_message, "Trials left: %d", RECOVERY_LOCK_MAX_ERROR - key_err);
             draw_visible_text_line(2, "* Recovery Locked *", 1);
+#else
+            sprintf(trials_left_message, "剩余尝试次数：%d", RECOVERY_LOCK_MAX_ERROR - key_err);
+            draw_visible_text_line(2, "* Recovery已上锁 *", 1);
+#endif
             draw_visible_text_line(3, trials_left_message, 1);
             draw_visible_text_line(5, pass_display, 1);
             while (1) {
@@ -3019,8 +3430,13 @@ void check_recovery_lock() {
     if (key_err >= RECOVERY_LOCK_MAX_ERROR) {
         LOGI("Max pass key errors reached!\n");
         ui_set_background(BACKGROUND_ICON_ERROR); // will also remove previous drawing
+#ifndef USE_CHINESE_FONT
         draw_visible_text_line(2, "Wrong pass!", 1);
         draw_visible_text_line(4, "Press a key to reboot", 1);
+#else
+        draw_visible_text_line(2, "密码错误！", 1);
+        draw_visible_text_line(4, "按任意键重启", 1);
+#endif
         ui_clear_key_queue();
         ui_wait_key();
         reboot_main_system(ANDROID_RB_RESTART, 0, 0);
@@ -3037,6 +3453,7 @@ void show_recovery_lock_menu() {
     // prompt for password if needed before allowing any modification
     check_recovery_lock();
 
+#ifndef USE_CHINESE_FONT
     const char* headers[] = {
         "Recovery Lock Setup",
         "",
@@ -3048,6 +3465,19 @@ void show_recovery_lock_menu() {
         "Disable Recovery Lock",
         NULL
     };
+#else
+    const char* headers[] = {
+        "Recovery锁设置",
+        "",
+        NULL
+    };
+
+    char* list[] = {
+        "修改Recovery密码",
+        "关闭Recovery锁",
+        NULL
+    };
+#endif
 
     for (;;) {
         int chosen_item = get_menu_selection(headers, list, 0, 0);
@@ -3059,7 +3489,11 @@ void show_recovery_lock_menu() {
                 break;
             }
             case 1: {
+#ifndef USE_CHINESE_FONT
                 if (confirm_selection("Disable Recovery Lock ?", "Yes - Disable Lock")) {
+#else
+                if (confirm_selection("关闭Recovery锁？", "是 - 关闭锁")) {
+#endif
                     delete_a_file(RECOVERY_LOCK_FILE);
                 }
                 break;
@@ -3073,7 +3507,11 @@ void show_recovery_lock_menu() {
 // called on recovery start (onscreen == ) and from About menu
 void print_libtouch_version(int onscreen) {
     if (onscreen)
+#ifndef USE_CHINESE_FONT
         ui_print("Touch GUI revision: " EXPAND(LIBTOUCH_GUI_VERSION) "\n");
+#else
+        ui_print("Touch GUI版本：" EXPAND(LIBTOUCH_GUI_VERSION) "\n");
+#endif
     else
         LOGI("Touch GUI revision: " EXPAND(LIBTOUCH_GUI_VERSION) "\n");
 }

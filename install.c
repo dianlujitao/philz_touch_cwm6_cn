@@ -176,8 +176,13 @@ try_update_binary(const char *path, ZipArchive *zip) {
 
     /* Set legacy properties */
     if (foundsetperm && !foundsetmeta) {
+#ifndef USE_CHINESE_FONT
         ui_print("Using legacy property environment for update-binary...\n");
         ui_print("Please upgrade to latest binary...\n");
+#else
+        ui_print("正在为update-binary使用传统特性环境...\n");
+        ui_print("请升级到最新的二进制文件...\n");
+#endif
         if (set_legacy_props() != 0) {
             LOGE("Legacy property environment did not init successfully. Properties may not be detected.\n");
         } else {
@@ -299,7 +304,11 @@ static int
 really_install_package(const char *path)
 {
     ui_set_background(BACKGROUND_ICON_INSTALLING);
+#ifndef USE_CHINESE_FONT
     ui_print("Finding update package...\n");
+#else
+    ui_print("正在查找升级包...\n");
+#endif
     // Give verification half the progress bar...
     // ui_reset_progress();
     // ui_show_progress(VERIFICATION_PROGRESS_FRACTION, VERIFICATION_PROGRESS_TIME);
@@ -312,7 +321,11 @@ really_install_package(const char *path)
         return INSTALL_CORRUPT;
     }
 
+#ifndef USE_CHINESE_FONT
     ui_print("Opening update package...\n");
+#else
+    ui_print("正在打开升级包...\n");
+#endif
 
     int err;
 
@@ -325,7 +338,11 @@ really_install_package(const char *path)
         }
         LOGI("%d key(s) loaded from %s\n", numKeys, PUBLIC_KEYS_FILE);
 
+#ifndef USE_CHINESE_FONT
         ui_print("Verifying update package...\n");
+#else
+        ui_print("正在验证升级包...\n");
+#endif
 
         err = verify_file(path, loadedKeys, numKeys);
         free(loadedKeys);
@@ -347,7 +364,11 @@ really_install_package(const char *path)
 
     /* Verify and install the contents of the package.
      */
+#ifndef USE_CHINESE_FONT
     ui_print("Installing update...\n");
+#else
+    ui_print("正在安装更新...\n");
+#endif
     return try_update_binary(path, &zip);
 }
 

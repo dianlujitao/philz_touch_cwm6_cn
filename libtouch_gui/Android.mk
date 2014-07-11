@@ -13,6 +13,11 @@ ifeq ($(RECOVERY_TOUCH_DEBUG),true)
 LOCAL_CFLAGS += -DRECOVERY_TOUCH_DEBUG
 endif
 
+ifeq ($(findstring fontcn,$(BOARD_USE_CUSTOM_RECOVERY_FONT)),fontcn)
+  LOCAL_CFLAGS += -DUSE_CHINESE_FONT
+  src_suffix := _cn
+endif
+
 LOCAL_SRC_FILES := touch_gui.c gui_settings.c nandroid_gui.c
 
 LOCAL_MODULE := libtouch_gui

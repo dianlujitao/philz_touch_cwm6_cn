@@ -101,12 +101,20 @@ static void nandroid_callback(const char* filename) {
         if (strlen(tmp) == 0)
             return;
         if (nandroid_files_total != 0) {
+#ifndef USE_CHINESE_FONT
             fprintf(stdout, "Progress: %.2f\r", ((float)nandroid_files_count / (float)nandroid_files_total) * 100);
+#else
+            fprintf(stdout, "进度：%.2f\r", ((float)nandroid_files_count / (float)nandroid_files_total) * 100);
+#endif
         } else {
             if (nandroid_stdout_progress == 0)
                 is_time_interval_passed(0);
             if (nandroid_stdout_progress == 0 || nandroid_stdout_progress > 20) {
+#ifndef USE_CHINESE_FONT
                 fprintf(stdout, "\rRestoring: >                    \b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b");
+#else
+                fprintf(stdout, "\r正在恢复：>                    \b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b");
+#endif
                 nandroid_stdout_progress = 1;
             } else if (is_time_interval_passed(100)) {
                 fprintf(stdout, ">");
@@ -121,10 +129,18 @@ static void nandroid_callback(const char* filename) {
     if (!use_nandroid_simple_logging.value && strlen(tmp) != 0)
         LOGI("%s\n", tmp);
 
+#ifndef USE_CHINESE_FONT
     static char size_progress[256] = "Size progress: N/A";
+#else
+    static char size_progress[256] = "大小进度：N/A";
+#endif
     if (show_nandroid_size_progress.value && Backup_Size != 0) {
         // Backup_Size == 0 if if we couldn't stat backup size
+#ifndef USE_CHINESE_FONT
         sprintf(size_progress, "Done %llu/%lluMb - Free %lluMb",
+#else
+        sprintf(size_progress, "已完成%llu/%lluMb - 空闲%lluMb",
+#endif
                 (Used_Size - Before_Used_Size) / 1048576LLU, Backup_Size / 1048576LLU, Free_Size / 1048576LLU);
     }
     size_progress[ui_get_text_cols() - 1] = '\0';
@@ -198,7 +214,11 @@ static int mkyaffs2image_wrapper(const char* backup_path, const char* backup_fil
 
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute mkyaffs2image.\n");
+#else
+        ui_print("无法运行mkyaffs2image。\n");
+#endif
         return -1;
     }
 
@@ -228,7 +248,11 @@ static int do_tar_compress(char* command, int callback, const char* backup_file_
     set_perf_mode(1);
     FILE *fp = __popen(command, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute tar command!\n");
+#else
+        ui_print("无法运行tar命令！\n");
+#endif
         set_perf_mode(0);
         return -1;
     }
@@ -283,11 +307,19 @@ void nandroid_dedupe_gc(const char* blob_dir) {
     char *d = dirname(backup_dir);
     strcpy(backup_dir, d);
     strcat(backup_dir, "/backup");
+#ifndef USE_CHINESE_FONT
     ui_print("Freeing space...\n");
+#else
+    ui_print("正在释放空间...\n");
+#endif
     char tmp[PATH_MAX];
     sprintf(tmp, "dedupe gc %s $(find %s -name '*.dup')", blob_dir, backup_dir);
     __system(tmp);
+#ifndef USE_CHINESE_FONT
     ui_print("Done freeing space.\n");
+#else
+    ui_print("释放空间完毕。\n");
+#endif
 }
 
 static int dedupe_compress_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
@@ -312,7 +344,11 @@ static int dedupe_compress_wrapper(const char* backup_path, const char* backup_f
 
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute dedupe.\n");
+#else
+        ui_print("无法运行dedupe.\n");
+#endif
         return -1;
     }
 
@@ -401,12 +437,20 @@ void set_override_yaffs2_wrapper(int set) {
 static nandroid_backup_handler get_backup_handler(const char *backup_path) {
     Volume *v = volume_for_path(backup_path);
     if (v == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to find volume.\n");
+#else
+        ui_print("无法找到卷。\n");
+#endif
         return NULL;
     }
     const MountedVolume *mv = find_mounted_volume_by_mount_point(v->mount_point);
     if (mv == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to find mounted volume: %s\n", v->mount_point);
+#else
+        ui_print("无法挂载卷：%s\n", v->mount_point);
+#endif
         return NULL;
     }
 
@@ -441,9 +485,17 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
     ensure_path_mounted(tmp);
     int callback = stat(tmp, &file_info) != 0;
 
+#ifndef USE_CHINESE_FONT
     ui_print("\n>> Backing up %s...\n", mount_point);
+#else
+    ui_print("\n>> 正在备份%s...\n", mount_point);
+#endif
     if (0 != (ret = ensure_path_mounted(mount_point) != 0)) {
+#ifndef USE_CHINESE_FONT
         ui_print("Can't mount %s!\n", mount_point);
+#else
+        ui_print("无法挂载%s！\n", mount_point);
+#endif
         return ret;
     }
 
@@ -486,7 +538,11 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
         LOGE("Error while making a backup image of %s!\n", mount_point);
         return ret;
     }
+#ifndef USE_CHINESE_FONT
     ui_print("Backup of %s completed.\n", name);
+#else
+    ui_print("备份%s完毕。\n", name);
+#endif
     return 0;
 }
 
@@ -494,7 +550,11 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
     Volume *vol = volume_for_path(root);
     // make sure the volume exists before attempting anything...
     if (vol == NULL || vol->fs_type == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Volume not found! Skipping backup of %s...\n", root);
+#else
+        ui_print("没有找到卷！跳过备份%s...\n", root);
+#endif
         return 0;
     }
 
@@ -504,7 +564,11 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
     if (strcmp(vol->fs_type, "mtd") == 0 ||
             strcmp(vol->fs_type, "bml") == 0 ||
             strcmp(vol->fs_type, "emmc") == 0) {
+#ifndef USE_CHINESE_FONT
         ui_print("\n>> Backing up %s...\n", root);
+#else
+        ui_print("\n>> 正在备份%s...\n", root);
+#endif
 
         char name[PATH_MAX];
         sprintf(name, "%s", BaseName(root));
@@ -515,13 +579,21 @@ int nandroid_backup_partition(const char* backup_path, const char* root) {
         else
             sprintf(tmp, "%s/%s.img", backup_path, name);
 
+#ifndef USE_CHINESE_FONT
         ui_print("Backing up %s image...\n", name);
+#else
+        ui_print("正在备份%s镜像...\n", name);
+#endif
         if (0 != (ret = backup_raw_partition(vol->fs_type, vol->blk_device, tmp))) {
             LOGE("Error while backing up %s image!\n", name);
             return ret;
         }
 
+#ifndef USE_CHINESE_FONT
         ui_print("Backup of %s image completed.\n", name);
+#else
+        ui_print("备份%s镜像完毕。\n", name);
+#endif
         return 0;
     }
 
@@ -533,7 +605,11 @@ int nandroid_backup(const char* backup_path) {
     refresh_default_backup_handler(); // this will mount /sdcard (primary storage)
 
     if (ensure_path_mounted(backup_path) != 0) {
+#ifndef USE_CHINESE_FONT
         return print_and_error("Can't mount backup path.\n", NANDROID_ERROR_GENERAL);
+#else
+        return print_and_error("无法挂载备份路径。\n", NANDROID_ERROR_GENERAL);
+#endif
     }
 /*
     // replaced by Get_Size_Via_statfs() check
@@ -550,11 +626,19 @@ int nandroid_backup(const char* backup_path) {
 
     // refresh size stats for backup_path
     if (0 != (ret = Get_Size_Via_statfs(backup_path)))
+#ifndef USE_CHINESE_FONT
         return print_and_error("Unable to stat backup path.\n", ret);
+#else
+        return print_and_error("无法统计备份路径。\n", ret);
+#endif
 
     // estimate backup size and ensure we have enough free space available on backup_path
     if (check_backup_size(backup_path) < 0)
+#ifndef USE_CHINESE_FONT
         return print_and_error("Not enough free space: backup cancelled.\n", NANDROID_ERROR_GENERAL);
+#else
+        return print_and_error("没有足够的空闲空间：备份取消。\n", NANDROID_ERROR_GENERAL);
+#endif
 
     // moved after backup size check to fix pause before showing low space prompt
     // this is caused by friendly log view triggering on ui_set_background(BACKGROUND_ICON_INSTALLING) call
@@ -587,13 +671,21 @@ int nandroid_backup(const char* backup_path) {
     Volume *vol = volume_for_path("/wimax");
     if (backup_wimax && vol != NULL && 0 == statfs(vol->blk_device, &s)) {
         char serialno[PROPERTY_VALUE_MAX];
+#ifndef USE_CHINESE_FONT
         ui_print("\n>> Backing up WiMAX...\n");
+#else
+        ui_print("\n>> 正在备份WiMAX...\n");
+#endif
         serialno[0] = 0;
         property_get("ro.serialno", serialno, "");
         sprintf(tmp, "%s/wimax.%s.img", backup_path, serialno);
         ret = backup_raw_partition(vol->fs_type, vol->blk_device, tmp);
         if (0 != ret)
+#ifndef USE_CHINESE_FONT
             return print_and_error("Error while dumping WiMAX image!\n", ret);
+#else
+            return print_and_error("提取WiMAX镜像时出错！\n", ret);
+#endif
     }
 
     if (backup_system && 0 != (ret = nandroid_backup_partition(backup_path, "/system")))
@@ -629,12 +721,21 @@ int nandroid_backup(const char* backup_path) {
     if (vol != NULL) {
         if (is_custom_backup && backup_preload) {
             if (0 != (ret = nandroid_backup_partition(backup_path, "/preload"))) {
+#ifndef USE_CHINESE_FONT
                 return print_and_error("Failed to backup /preload!\n", ret);
+#else
+                return print_and_error("备份/preload失败！\n", ret);
+#endif
             }
         } else if (!is_custom_backup && nandroid_add_preload.value) {
             if (0 != (ret = nandroid_backup_partition(backup_path, "/preload"))) {
+#ifndef USE_CHINESE_FONT
                 ui_print("Failed to backup preload! Try to disable it.\n");
                 ui_print("Skipping /preload...\n");
+#else
+                ui_print("备份preload失败！尝试跳过它。\n");
+                ui_print("正在跳过/preload...\n");
+#endif
                 //return print_and_error("Failed to backup /preload!\n", ret);
             }
         }
@@ -646,10 +747,18 @@ int nandroid_backup(const char* backup_path) {
         //first backup in raw format, returns 0 on success (or if skipped), else 1
         sprintf(tmp, "%s", DirName(backup_path));
         if (0 != dd_raw_backup_handler(tmp, "/efs"))
+#ifndef USE_CHINESE_FONT
             ui_print("EFS raw image backup failed! Trying native backup...\n");
+#else
+            ui_print("EFS原始镜像备份失败！尝试本地备份...\n");
+#endif
 
         //second backup in native cwm format
+#ifndef USE_CHINESE_FONT
         ui_print("creating 2nd copy...\n");
+#else
+        ui_print("创建第二个拷贝...\n");
+#endif
         if (0 != (ret = nandroid_backup_partition(backup_path, "/efs")))
             return print_and_error(NULL, ret);
     }
@@ -752,7 +861,11 @@ static int unyaffs_wrapper(const char* backup_file_image, const char* backup_pat
     sprintf(tmp, "cd %s ; unyaffs %s ; exit $?", backup_path, backup_file_image);
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute unyaffs.\n");
+#else
+        ui_print("无法运行unyaffs。\n");
+#endif
         return -1;
     }
 
@@ -783,7 +896,11 @@ static int do_tar_extract(char* command, const char* backup_file_image, const ch
     set_perf_mode(1);
     FILE *fp = __popen(command, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute tar command.\n");
+#else
+        ui_print("无法运行tar命令。\n");
+#endif
         set_perf_mode(0);
         return -1;
     }
@@ -840,7 +957,11 @@ static int dedupe_extract_wrapper(const char* backup_file_image, const char* bac
     char path[PATH_MAX];
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to execute dedupe.\n");
+#else
+        ui_print("无法运行dedupe。\n");
+#endif
         return -1;
     }
 
@@ -870,13 +991,21 @@ static int tar_undump_wrapper(const char* backup_file_image, const char* backup_
 static nandroid_restore_handler get_restore_handler(const char *backup_path) {
     Volume *v = volume_for_path(backup_path);
     if (v == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to find volume.\n");
+#else
+        ui_print("无法找到卷。\n");
+#endif
         return NULL;
     }
     scan_mounted_volumes();
     const MountedVolume *mv = find_mounted_volume_by_mount_point(v->mount_point);
     if (mv == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Unable to find mounted volume: %s\n", v->mount_point);
+#else
+        ui_print("无法找到已挂载的卷：%s\n", v->mount_point);
+#endif
         return NULL;
     }
 
@@ -910,7 +1039,11 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
     if (vol != NULL)
         device = vol->blk_device;
 
+#ifndef USE_CHINESE_FONT
     ui_print("\n>> Restoring %s...\n", mount_point);
+#else
+    ui_print("\n>> 正在恢复%s...\n", mount_point);
+#endif
     char tmp[PATH_MAX];
     sprintf(tmp, "%s/%s.img", backup_path, name);
     struct stat file_info;
@@ -980,14 +1113,27 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
 
         if (twrp_backup_mode.value) {
             if (ret != 0) {
+#ifndef USE_CHINESE_FONT
                 ui_print("Could not find TWRP backup image for %s\n", mount_point);
                 ui_print("Skipping restore of %s\n", mount_point);
+#else
+                ui_print("无法为%s找到TWRP备份镜像\n", mount_point);
+                ui_print("跳过恢复%s\n", mount_point);
+#endif
                 return 0;
             }
+#ifndef USE_CHINESE_FONT
             ui_print("Found backup image: %s\n", BaseName(tmp));
+#else
+            ui_print("找到备份镜像：%s\n", BaseName(tmp));
+#endif
         } else if (backup_filesystem == NULL || restore_handler == NULL) {
             //ui_print("%s.img not found. Skipping restore of %s.\n", name, mount_point);
+#ifndef USE_CHINESE_FONT
             ui_print("No %s backup found(img, tar, dup). Skipping restore of %s.\n", name, mount_point);
+#else
+            ui_print("没有找到%s备份（img, tar, dup）。跳过恢复%s。\n", name, mount_point);
+#endif
             return 0;
         } else {
             printf("Found new backup image: %s\n", tmp);
@@ -1025,25 +1171,45 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
     ensure_path_mounted(path);
     int callback = stat(path, &file_info) != 0;
 
+#ifndef USE_CHINESE_FONT
     ui_print("Restoring %s...\n", name);
+#else
+    ui_print("正在恢复%s...\n", name);
+#endif
     if (backup_filesystem == NULL) {
         if (0 != (ret = format_volume(mount_point))) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error while formatting %s!\n", mount_point);
+#else
+            ui_print("格式化%s时出错！\n", mount_point);
+#endif
             return ret;
         }
     } else if (0 != (ret = format_device(device, mount_point, backup_filesystem))) {
+#ifndef USE_CHINESE_FONT
         ui_print("Error while formatting %s!\n", mount_point);
+#else
+        ui_print("格式化%s时出错！\n", mount_point);
+#endif
         return ret;
     }
 
     if (0 != (ret = ensure_path_mounted(mount_point))) {
+#ifndef USE_CHINESE_FONT
         ui_print("Can't mount %s!\n", mount_point);
+#else
+        ui_print("无法挂载%s！\n", mount_point);
+#endif
         return ret;
     }
 
     if (twrp_backup_mode.value) {
         if (0 != (ret = twrp_restore_wrapper(tmp, mount_point, callback))) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error while restoring %s!\n", mount_point);
+#else
+            ui_print("恢复%s时出错！\n", mount_point);
+#endif
             return ret;
         }
     } else {
@@ -1056,12 +1222,20 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
         }
 
         if (restore_handler == NULL) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error finding an appropriate restore handler.\n");
+#else
+            ui_print("寻找一个合适的还原处理程序出错。\n");
+#endif
             return -2;
         }
 
         if (0 != (ret = restore_handler(tmp, mount_point, callback))) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error while restoring %s!\n", mount_point);
+#else
+            ui_print("恢复%s时出错！\n", mount_point);
+#endif
             return ret;
         }
     }
@@ -1077,14 +1251,22 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
     Volume *vol = volume_for_path(root);
     // make sure the volume exists...
     if (vol == NULL || vol->fs_type == NULL) {
+#ifndef USE_CHINESE_FONT
         ui_print("Volume not found! Skipping restore of %s...\n", root);
+#else
+        ui_print("卷没有找到！跳过恢复%s...\n", root);
+#endif
         return 0;
     }
 
     // see if we need a raw restore (mtd)
     char tmp[PATH_MAX];
     if (strcmp(vol->fs_type, "mtd") == 0 || strcmp(vol->fs_type, "bml") == 0 || strcmp(vol->fs_type, "emmc") == 0) {
+#ifndef USE_CHINESE_FONT
         ui_print("\n>> Restoring %s...\nUsing raw mode...\n", root);
+#else
+        ui_print("\n>> 正在恢复%s...\n使用raw模式...\n", root);
+#endif
         int ret;
         char name[PATH_MAX];
         sprintf(name, "%s", BaseName(root));
@@ -1100,18 +1282,38 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
             sprintf(tmp, "%s%s.img", backup_path, root);
 
         if (0 != strcmp(backup_path, "-") && 0 != stat(tmp, &file_check)) {
+#ifndef USE_CHINESE_FONT
             ui_print("%s not found. Skipping restore of %s\n", BaseName(tmp), root);
+#else
+            ui_print("%s没有找到。跳过恢复%s\n", BaseName(tmp), root);
+#endif
             return 0;
         }
 
+#ifndef USE_CHINESE_FONT
         ui_print("Erasing %s before restore...\n", name);
+#else
+        ui_print("在恢复之前清除%s...\n", name);
+#endif
         if (0 != (ret = format_volume(root))) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error while erasing %s image!\n", name);
+#else
+            ui_print("清除%s镜像时出错！\n", name);
+#endif
             return ret;
         }
+#ifndef USE_CHINESE_FONT
         ui_print("Restoring %s image...\n", name);
+#else
+        ui_print("正在恢复%s镜像...\n", name);
+#endif
         if (0 != (ret = restore_raw_partition(vol->fs_type, vol->blk_device, tmp))) {
+#ifndef USE_CHINESE_FONT
             ui_print("Error while flashing %s image!\n", name);
+#else
+            ui_print("刷入%s镜像时出错！\n", name);
+#endif
             return ret;
         }
         return 0;
@@ -1132,11 +1334,19 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
     last_key_ev = timenow_msec();
 #endif
     if (ensure_path_mounted(backup_path) != 0)
+#ifndef USE_CHINESE_FONT
         return print_and_error("Can't mount backup path\n", NANDROID_ERROR_GENERAL);
+#else
+        return print_and_error("无法挂载备份路径\n", NANDROID_ERROR_GENERAL);
+#endif
 
     char tmp[PATH_MAX];
     if (enable_md5sum.value && verify_nandroid_md5sum(backup_path) != 0) {
+#ifndef USE_CHINESE_FONT
         return print_and_error("MD5 verification failed!\n", NANDROID_ERROR_GENERAL);
+#else
+        return print_and_error("MD5验证失败！\n", NANDROID_ERROR_GENERAL);
+#endif
     }
 
     ui_show_indeterminate_progress(); // call after verify_nandroid_md5sum() as it will reset the progress
@@ -1160,7 +1370,11 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
     struct statfs s;
     Volume *vol = volume_for_path("/wimax");
     if (restore_wimax && vol != NULL && 0 == statfs(vol->blk_device, &s)) {
+#ifndef USE_CHINESE_FONT
         ui_print("\n>> Restoring WiMAX...\n");
+#else
+
+#endif
         char serialno[PROPERTY_VALUE_MAX];
 
         serialno[0] = 0;
@@ -1169,15 +1383,31 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
 
         struct stat st;
         if (0 != stat(tmp, &st)) {
+#ifndef USE_CHINESE_FONT
             ui_print("WARNING: WiMAX partition exists, but nandroid\n");
             ui_print("         backup does not contain WiMAX image.\n");
             ui_print("         You should create a new backup to\n");
             ui_print("         protect your WiMAX keys.\n");
+#else
+            ui_print("WARNING: WiMAX分区存在，但是nandroid\n");
+            ui_print("         备份不包括WiMAX镜像\n");
+            ui_print("         你应该创建一个新的备份\n");
+            ui_print("         来保护你的WiMAX密钥。\n");
+#endif
         } else {
+#ifndef USE_CHINESE_FONT
             ui_print("Erasing WiMAX before restore...\n");
+#else
+            ui_print("在恢复前清除WiMAX...\n");
+#endif
             if (0 != (ret = format_volume("/wimax")))
+#ifndef USE_CHINESE_FONT
                 return print_and_error("Error while formatting wimax!\n", ret);
             ui_print("Restoring WiMAX image...\n");
+#else
+                return print_and_error("格式化wimax时出错！\n", ret);
+            ui_print("正在恢复WiMAX镜像...\n");
+#endif
             if (0 != (ret = restore_raw_partition(vol->fs_type, vol->blk_device, tmp)))
                 return print_and_error(NULL, ret);
         }
@@ -1218,13 +1448,22 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
     if (vol != NULL) {
         if (is_custom_backup && backup_preload) {
             if (0 != (ret = nandroid_restore_partition(backup_path, "/preload"))) {
+#ifndef USE_CHINESE_FONT
                 ui_print("Failed to restore /preload!\n");
+#else
+                ui_print("恢复/preload失败！\n");
+#endif
                 return print_and_error(NULL, ret);
             }
         } else if (!is_custom_backup && nandroid_add_preload.value) {
             if (restore_system && 0 != (ret = nandroid_restore_partition(backup_path, "/preload"))) {
+#ifndef USE_CHINESE_FONT
                 ui_print("Failed to restore preload! Try to disable it.\n");
                 ui_print("Skipping /preload...\n");
+#else
+                ui_print("恢复preload失败！尝试跳过它。\n");
+                ui_print("正在跳过/preload...\n");
+#endif
                 //return print_and_error(NULL, ret);
             }
         }

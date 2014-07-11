@@ -154,10 +154,18 @@ void verify_settings_file() {
 
     // restore settings from the copy if needed (after a wipe)
     if (!file_found(PHILZ_SETTINGS_FILE) && file_found(settings_copy)) {
+#ifndef USE_CHINESE_FONT
         if (!auto_restore_settings.value && !confirm_selection("Restore recovery settings?", "Yes - Restore from sdcard"))
+#else
+        if (!auto_restore_settings.value && !confirm_selection("恢复recovery设置？", "是 - 从SD卡恢复"))
+#endif
             return;
         if (copy_a_file(settings_copy, PHILZ_SETTINGS_FILE) == 0)
+#ifndef USE_CHINESE_FONT
             ui_print("Recovery settings restored.\n");
+#else
+            ui_print("Recovery设置回复完毕。\n");
+#endif
     }
 }
 

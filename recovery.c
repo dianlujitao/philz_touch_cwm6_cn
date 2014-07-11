@@ -407,7 +407,11 @@ erase_volume(const char *volume) {
         }
     }
 
+#ifndef USE_CHINESE_FONT
     ui_print("Formatting %s...\n", volume);
+#else
+    ui_print("正在格式化%s...\n", volume);
+#endif
 
     ensure_path_unmounted(volume);
     int result = format_volume(volume);
@@ -633,11 +637,19 @@ get_menu_selection(const char** headers, char** items, int menu_only,
                 wrap_count = 0;
                 if (ui_get_rainbow_mode()) {
                     ui_set_rainbow_mode(0);
+#ifndef USE_CHINESE_FONT
                     ui_print("Rainbow mode disabled\n");
+#else
+                    ui_print("彩虹模式关闭\n");
+#endif
                 }
                 else {
                     ui_set_rainbow_mode(1);
+#ifndef USE_CHINESE_FONT
                     ui_print("Rainbow mode enabled!\n");
+#else
+                    ui_print("彩虹模式打开！\n");
+#endif
                 }
             }
         }
@@ -658,10 +670,17 @@ static int
 update_directory(const char* path, const char* unmount_when_done) {
     ensure_path_mounted(path);
 
+#ifndef USE_CHINESE_FONT
     const char* MENU_HEADERS[] = { "Choose a package to install:",
                                    path,
                                    "",
                                    NULL };
+#else
+    const char* MENU_HEADERS[] = { "选择一个刷机包来安装：",
+                                   path,
+                                   "",
+                                   NULL };
+#endif
     DIR* d;
     struct dirent* de;
     d = opendir(path);
@@ -786,11 +805,19 @@ update_directory(const char* path, const char* unmount_when_done) {
 // remove static to be able to call it from ors menu
 void
 wipe_data(int confirm) {
+#ifndef USE_CHINESE_FONT
     if (confirm && !confirm_selection( "Confirm wipe of all user data?", "Yes - Wipe all user data")) {
+#else
+    if (confirm && !confirm_selection( "确认清除所有用户数据？", "是 - 清除所有用户数据")) {
+#endif
         return;
     }
 
+#ifndef USE_CHINESE_FONT
     ui_print("\n-- Wiping data...\n");
+#else
+    ui_print("\n-- 正在清除data...\n");
+#endif
     device_wipe_data();
     erase_volume("/data");
     erase_volume("/cache");
@@ -814,7 +841,11 @@ wipe_data(int confirm) {
             erase_volume(buf);
         }
     }
+#ifndef USE_CHINESE_FONT
     ui_print("Data wipe complete.\n");
+#else
+    ui_print("Data清除完毕。\n");
+#endif
 }
 
 int enter_sideload_mode(int status) {
@@ -827,7 +858,11 @@ int enter_sideload_mode(int status) {
                                 NULL
     };
 
+#ifndef USE_CHINESE_FONT
     static char* list[] = { "Cancel sideload", NULL };
+#else
+    static char* list[] = { "取消sideload", NULL };
+#endif
     int icon = ui_get_background_icon();
 
     get_menu_selection(headers, list, 0, 0);
@@ -838,18 +873,30 @@ int enter_sideload_mode(int status) {
         status = ret;
 #ifdef ENABLE_LOKI
         if (status == INSTALL_SUCCESS && loki_support_enabled() > 0) {
+#ifndef USE_CHINESE_FONT
             ui_print("Checking if loki-fying is needed\n");
+#else
+            ui_print("正在检查是否需要loki-fying\n");
+#endif
             status = loki_check();
         }
 #endif
         if (status != INSTALL_SUCCESS) {
             ui_set_background(BACKGROUND_ICON_ERROR);
+#ifndef USE_CHINESE_FONT
             ui_print("Installation aborted.\n");
+#else
+            ui_print("安装中止。\n");
+#endif
         } else if (!ui_IsTextVisible()) {
             return status;  // recovery start command: reboot if logs aren't visible
         } else {
             ui_set_background(icon);
+#ifndef USE_CHINESE_FONT
             ui_print("\nInstall from ADB complete.\n");
+#else
+            ui_print("\n从ADB安装完毕。\n");
+#endif
         }
     }
     return status;
@@ -910,11 +957,21 @@ prompt_and_wait(int status) {
                     break;
 
                 case ITEM_WIPE_CACHE:
+#ifndef USE_CHINESE_FONT
                     if (ui_IsTextVisible() && !confirm_selection("Confirm wipe?", "Yes - Wipe Cache"))
+#else
+                    if (ui_IsTextVisible() && !confirm_selection("确认清除？", "是 - 清除Cache"))
+#endif
                         break;
+#ifndef USE_CHINESE_FONT
                     ui_print("\n-- Wiping cache...\n");
                     erase_volume("/cache");
                     ui_print("Cache wipe complete.\n");
+#else
+                    ui_print("\n-- 正在清除cache...\n");
+                    erase_volume("/cache");
+                    ui_print("Cache清除完毕。\n");
+#endif
                     if (!ui_IsTextVisible()) return;
                     break;
 
@@ -1188,7 +1245,11 @@ main(int argc, char **argv) {
     sehandle = selabel_open(SELABEL_CTX_FILE, seopts, 1);
 
     if (!sehandle) {
+#ifndef USE_CHINESE_FONT
         ui_print("Warning:  No file_contexts\n");
+#else
+        ui_print("警告：没有file_contexts\n");
+#endif
     }
 
     LOGI("device_recovery_start()\n");
@@ -1224,7 +1285,11 @@ main(int argc, char **argv) {
     if (update_package != NULL) {
         status = install_package(update_package);
         if (status != INSTALL_SUCCESS) {
+#ifndef USE_CHINESE_FONT
             ui_print("Installation aborted.\n");
+#else
+            ui_print("安装中止。\n");
+#endif
 
             // If this is an eng or userdebug build, then automatically
             // turn the text display on if the script fails so the error
@@ -1242,13 +1307,25 @@ main(int argc, char **argv) {
         preserve_data_media(1);
         if (has_datadata() && erase_volume("/datadata")) status = INSTALL_ERROR;
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
+#ifndef USE_CHINESE_FONT
         if (status != INSTALL_SUCCESS) ui_print("Data wipe failed.\n");
+#else
+        if (status != INSTALL_SUCCESS) ui_print("Data清除失败。\n");
+#endif
     } else if (wipe_cache) {
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
+#ifndef USE_CHINESE_FONT
         if (status != INSTALL_SUCCESS) ui_print("Cache wipe failed.\n");
+#else
+        if (status != INSTALL_SUCCESS) ui_print("Cache清除失败。\n");
+#endif
     } else if (wipe_media) {
         if (is_data_media() && erase_volume("/data/media")) status = INSTALL_ERROR;
+#ifndef USE_CHINESE_FONT
         if (status != INSTALL_SUCCESS) ui_print("Media wipe failed.\n");
+#else
+        if (status != INSTALL_SUCCESS) ui_print("Media清除失败。\n");
+#endif
     } else if (sideload) {
         // we need show_text to show adb sideload cancel menu
         bool text_visible = ui_IsTextVisible();
@@ -1299,10 +1376,18 @@ main(int argc, char **argv) {
     // We reach here when in main menu we choose reboot main system or on success install of boot scripts and recovery commands
     finish_recovery(send_intent);
     if (shutdown_after) {
+#ifndef USE_CHINESE_FONT
         ui_print("Shutting down...\n");
+#else
+        ui_print("正在关机...\n");
+#endif
         reboot_main_system(ANDROID_RB_POWEROFF, 0, 0);
     } else {
+#ifndef USE_CHINESE_FONT
         ui_print("Rebooting...\n");
+#else
+        ui_print("正在重启...\n");
+#endif
         reboot_main_system(ANDROID_RB_RESTART, 0, 0);
     }
     return EXIT_SUCCESS;

@@ -944,7 +944,11 @@ void ui_friendly_log(int engage_friendly_view)
                 // if force_wait == 1, we want to force a wait overriding user choice
                 ignore_key_action = 1;
                 ui_clear_key_queue();
+#ifndef USE_CHINESE_FONT
                 ui_print("press any key to continue.\n");
+#else
+                ui_print("按任意键继续。\n");
+#endif
                 ui_wait_key();
             }
         }
