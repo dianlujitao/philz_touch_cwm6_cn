@@ -1167,6 +1167,11 @@ main(int argc, char **argv) {
 #ifdef PHILZ_TOUCH_RECOVERY
     print_libtouch_version(0);
 #endif
+#ifndef USE_CHINESE_FONT
+    ui_print("Author: dianlujitao@ATX-Team\n");
+#else
+    ui_print("作者：dianlujitao@ATX团队\n");
+#endif
 
     int st_cur, st_max;
     if (stage != NULL && sscanf(stage, "%d/%d", &st_cur, &st_max) == 2) {
