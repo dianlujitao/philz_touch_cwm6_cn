@@ -50,6 +50,11 @@
 
 /******** start philz functions declarartion ********/
 
+// refresh screen and redraw everything
+void ui_update_screen() {
+    update_screen_locked();
+}
+
 // define gui layout default colors and toggle integers
 // MENU_TEXT_COLOR:         text in menus
 // MENU_BACKGROUND_COLOR:   menus background color
@@ -441,7 +446,7 @@ void draw_text_line(int row, const char* t, int height, int align) {
     }
 }
 
-// draw and make visible a text line
+// draw and make visible a text line over current screen (no whole screen redraw)
 // row == 0 is top screen
 void draw_visible_text_line(int row, const char* t, int align) {
     pthread_mutex_lock(&gUpdateMutex);
@@ -992,7 +997,8 @@ void ui_refresh_display_state(int *screen_timeout) {
             ui_blank_screen(1); // this will also set is_blanked to 1
 
         // refresh clock and battery display if screen is not blanked
-        if (!is_blanked) {
+        // if text is not visible, no need to refresh clock/time (password prompt start up screen)
+        if (!is_blanked && ui_IsTextVisible()) {
             pthread_mutex_lock(&gUpdateMutex);
             update_screen_locked();
             pthread_mutex_unlock(&gUpdateMutex);

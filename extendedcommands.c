@@ -23,7 +23,6 @@
 #include "bootloader.h"
 #include "common.h"
 #include "cutils/properties.h"
-#include "firmware.h"
 #include "install.h"
 #include "make_ext4fs.h"
 #include "minui/minui.h"
@@ -50,6 +49,8 @@
 #ifdef PHILZ_TOUCH_RECOVERY
 #include "libtouch_gui/gui_settings.h"
 #endif
+
+extern struct selabel_handle *sehandle;
 
 int get_filtered_menu_selection(const char** headers, char** items, int menu_only, int initial_selection, int items_count) {
     int index;
@@ -110,9 +111,9 @@ void write_recovery_version() {
     sprintf(path, "%s/%s", get_primary_storage_path(), RECOVERY_VERSION_FILE);
     write_string_to_file(path, EXPAND(RECOVERY_VERSION) "\n" EXPAND(TARGET_DEVICE));
     // force unmount /data for /data/media devices as we call this on recovery exit
-    ignore_data_media_workaround(1);
+    preserve_data_media(0);
     ensure_path_unmounted(path);
-    ignore_data_media_workaround(0);
+    preserve_data_media(1);
 }
 
 static void write_last_install_path(const char* install_path) {
@@ -189,7 +190,9 @@ int install_zip(const char* packagefilepath) {
         set_sdcard_update_bootloader_message();
     }
 
-    int status = install_package(packagefilepath); // will ensure_path_mounted(packagefilepath) 
+    // will ensure_path_mounted(packagefilepath)
+    // will also set background icon to installing and indeterminate progress bar
+    int status = install_package(packagefilepath);
     ui_reset_progress();
     if (status != INSTALL_SUCCESS) {
         ui_set_background(BACKGROUND_ICON_ERROR);
@@ -207,7 +210,13 @@ int install_zip(const char* packagefilepath) {
     }
 #endif
 
-    ui_set_background(BACKGROUND_ICON_NONE);
+#ifdef PHILZ_TOUCH_RECOVERY
+    if (show_background_icon.value)
+        ui_set_background(BACKGROUND_ICON_CLOCKWORK);
+    else
+#endif
+        ui_set_background(BACKGROUND_ICON_NONE);
+
     ui_print("\nInstall from sdcard complete.\n");
     return 0;
 }
@@ -281,7 +290,7 @@ int show_install_update_menu() {
             else
                 show_choose_zip_menu(last_path_used);
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 2) {
-            apply_from_adb();
+            enter_sideload_mode(INSTALL_SUCCESS);
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 3) {
             show_multi_flash_menu();
         } else if (chosen_item == FIXED_TOP_INSTALL_ZIP_MENUS + num_extra_volumes + 4) {
@@ -320,6 +329,11 @@ void free_string_array(char** array) {
 // to gather directories you need to pass NULL for fileExtensionOrDirectory
 // else, only files are gathered. Pass "" to gather all files
 // NO  MORE NEEDED: if it is not called by choose_file_menu(), passed directory MUST end with a trailing /
+static int gather_hidden_files = 0;
+void set_gather_hidden_files(int enable) {
+    gather_hidden_files = enable;
+}
+
 char** gather_files(const char* basedir, const char* fileExtensionOrDirectory, int* numFiles) {
     DIR *dir;
     struct dirent *de;
@@ -354,7 +368,7 @@ char** gather_files(const char* basedir, const char* fileExtensionOrDirectory, i
     for (pass = 0; pass < 2; pass++) {
         while ((de = readdir(dir)) != NULL) {
             // skip hidden files
-            if (de->d_name[0] == '.')
+            if (!gather_hidden_files && de->d_name[0] == '.')
                 continue;
 
             // NULL means that we are gathering directories, so skip this
@@ -707,35 +721,29 @@ int confirm_selection(const char* title, const char* confirm) {
         int chosen_item = get_menu_selection(confirm_headers, items, 0, 0);
         ret = (chosen_item == 1);
     }
+
     free(confirm_str);
     ui_set_showing_back_button(old_val);
     return ret;
 }
 
-#define MKE2FS_BIN      "/sbin/mke2fs"
-#define TUNE2FS_BIN     "/sbin/tune2fs"
-#define E2FSCK_BIN      "/sbin/e2fsck"
-extern void reset_ext4fs_info();
-
-// format_device() is called only by nandroid_restore_partition_extended()
-extern struct selabel_handle *sehandle;
+// format to user choice fstype
+// called by nandroid_restore_partition_extended() and format_ext4_or_f2fs()
 int format_device(const char *device, const char *path, const char *fs_type) {
 #ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
-    if(device_truedualboot_format_device(device, path, fs_type) <= 0)
+    if (device_truedualboot_format_device(device, path, fs_type) <= 0)
         return 0;
 #endif
+
+    // check if we're formatting primary_storage (/sdcard) on /data/media device
+    // in that case, issue a rm -rf like command
     if (is_data_media_volume_path(path)) {
-        return format_unknown_device(NULL, path, NULL);
-    }
-    if (strstr(path, "/data") == path && is_data_media()) {
         return format_unknown_device(NULL, path, NULL);
     }
 
     Volume* v = volume_for_path(path);
     if (v == NULL) {
-        // silent failure for sd-ext
-        if (strcmp(path, "/sd-ext") != 0)
-            LOGE("unknown volume '%s'\n", path);
+        LOGE("unknown volume \"%s\"\n", path);
         return -1;
     }
 
@@ -745,25 +753,31 @@ int format_device(const char *device, const char *path, const char *fs_type) {
         return -1;
     }
 
-    if (strcmp(fs_type, "rfs") == 0) {
-        if (ensure_path_unmounted(path) != 0) {
-            LOGE("format_volume failed to unmount \"%s\"\n", v->mount_point);
-            return -1;
-        }
-        if (0 != format_rfs_device(device, path)) {
-            LOGE("format_volume: format_rfs_device failed on %s\n", device);
-            return -1;
-        }
-        return 0;
-    }
-
+    // if we're formatting a path, this will act like 'rm -rf volume'
     if (strcmp(v->mount_point, path) != 0) {
         return format_unknown_device(v->blk_device, path, NULL);
+    }
+
+    // check to see if /data is being formatted, and if it is /data/media
+    // by default, is_data_media_preserved() == 1, so we will go to format_unknown_device()
+    // format_unknown_device() with null fstype will rm -rf /data, excluding /data/media path
+    // if preserve_data_media(0) is called, is_data_media_preserved() will return 0
+    // in that case, we will not use format_unknown_device() but proceed to below with a true format command issued
+    if (strcmp(path, "/data") == 0 && is_data_media() && is_data_media_preserved()) {
+        return format_unknown_device(NULL, path, NULL);
     }
 
     if (ensure_path_unmounted(path) != 0) {
         LOGE("format_volume failed to unmount \"%s\"\n", v->mount_point);
         return -1;
+    }
+
+    if (strcmp(fs_type, "rfs") == 0) {
+        if (0 != format_rfs_device(device, path)) {
+            LOGE("format_volume: format_rfs_device failed on %s\n", device);
+            return -1;
+        }
+        return 0;
     }
 
     if (strcmp(fs_type, "yaffs2") == 0 || strcmp(fs_type, "mtd") == 0) {
@@ -795,7 +809,7 @@ int format_device(const char *device, const char *path, const char *fs_type) {
             // Our desired filesystem matches the one in fstab, respect v->length
             length = v->length;
         }
-        reset_ext4fs_info();
+
         int result = make_ext4fs(device, length, v->mount_point, sehandle);
         if (result != 0) {
             LOGE("format_volume: make_ext4fs failed on %s\n", device);
@@ -803,11 +817,12 @@ int format_device(const char *device, const char *path, const char *fs_type) {
         }
         return 0;
     }
+
 #ifdef USE_F2FS
     if (strcmp(fs_type, "f2fs") == 0) {
-        int result = make_f2fs_main(device, v->mount_point);
-        if (result != 0) {
-            LOGE("format_volume: mkfs.f2f2 failed on %s\n", device);
+        char* args[] = { "mkfs.f2fs", v->blk_device };
+        if (make_f2fs_main(2, args) != 0) {
+            LOGE("format_volume: mkfs.f2fs failed on %s\n", v->blk_device);
             return -1;
         }
         return 0;
@@ -816,9 +831,14 @@ int format_device(const char *device, const char *path, const char *fs_type) {
     return format_unknown_device(device, path, fs_type);
 }
 
+// support format MTD, MMC, BML, ext2, ext3 and directory rm -rf like
+// if fstype is NULL, it will continue with rm -rf "path" command ignoring 'device'
+// if it is /data on data media device, we'll exclude /data/media
+// on any other path or partition: rm -rf 'path'
 int format_unknown_device(const char *device, const char* path, const char *fs_type) {
     LOGI("Formatting unknown device.\n");
 
+    // format MTD, MMC, BML
     if (fs_type != NULL && get_flash_type(fs_type) != UNSUPPORTED)
         return erase_raw_partition(fs_type, device);
 
@@ -832,7 +852,7 @@ int format_unknown_device(const char *device, const char* path, const char *fs_t
         }
     }
 
-    if (NULL != fs_type) {
+    if (fs_type != NULL) {
         if (strcmp("ext3", fs_type) == 0) {
             LOGI("Formatting ext3 device.\n");
             if (0 != ensure_path_unmounted(path)) {
@@ -853,35 +873,41 @@ int format_unknown_device(const char *device, const char* path, const char *fs_t
     }
 
     if (0 != ensure_path_mounted(path)) {
-        ui_print("Error mounting %s!\n", path);
-        ui_print("Skipping format...\n");
-        return 0;
+        LOGE("Error mounting %s!\n", path);
+        return -1;
     }
 
+    int ret;
     char tmp[PATH_MAX];
-    if (strcmp(path, "/data") == 0) {
-        sprintf(tmp, "cd /data ; for f in $(ls -a | grep -v ^media$); do rm -rf $f; done");
-        __system(tmp);
+    if (strcmp(path, "/data") == 0 && is_data_media() && is_data_media_preserved()) {
+        // Preserve .layout_version to avoid "nesting bug"
         // if the /data/media sdcard has already been migrated for android 4.2,
-        // prevent the migration from happening again by writing the .layout_version
-        struct stat st;
-        if (0 == lstat("/data/media/0", &st)) {
-            char* layout_version = "2";
-            FILE* f = fopen("/data/.layout_version", "wb");
-            if (NULL != f) {
-                fwrite(layout_version, 1, 2, f);
-                fclose(f);
-            } else {
-                LOGI("error opening /data/.layout_version for write.\n");
-            }
+        // prevent the migration from happening again by saving the .layout_version
+        LOGI("Preserving layout version\n");
+        unsigned char layout_buf[256];
+        ssize_t layout_buflen = -1;
+        int fd;
+        fd = open("/data/.layout_version", O_RDONLY);
+        if (fd != -1) {
+            layout_buflen = read(fd, layout_buf, sizeof(layout_buf));
+            close(fd);
         } else {
             LOGI("/data/media/0 not found. migration may occur.\n");
         }
+
+        ret = rmtree_except("/data", "media");
+
+        // Restore .layout_version
+        if (layout_buflen > 0) {
+            LOGI("Restoring layout version\n");
+            fd = open("/data/.layout_version", O_WRONLY | O_CREAT | O_EXCL, 0600);
+            if (fd != -1) {
+                write(fd, layout_buf, layout_buflen);
+                close(fd);
+            }
+        }
     } else {
-        sprintf(tmp, "rm -rf %s/*", path);
-        __system(tmp);
-        sprintf(tmp, "rm -rf %s/.*", path);
-        __system(tmp);
+        ret = rmtree_except(path, NULL);
     }
 
     ensure_path_unmounted(path);
@@ -972,6 +998,59 @@ MFMatrix get_mnt_fmt_capabilities(char *fs_type, char *mount_point) {
     return mfm;
 }
 
+#ifdef USE_F2FS
+static void format_ext4_or_f2fs(const char* volume) {
+    if (is_data_media_volume_path(volume))
+        return;
+
+    Volume* v = volume_for_path(volume);
+    if (v == NULL)
+        return;
+
+    const char* headers[] = { "Format device:", v->mount_point, "", NULL };
+
+    char* list[] = {
+        "default",
+        "ext4",
+        "f2fs",
+        NULL
+    };
+
+    char cmd[PATH_MAX];
+    char confirm[128];
+    int ret = -1;
+    int chosen_item = get_menu_selection(headers, list, 0, 0);
+
+    if (chosen_item < 0) // REFRESH or GO_BACK
+        return;
+
+    sprintf(confirm, "Format %s (%s) ?", v->mount_point, list[chosen_item]);
+    if (!confirm_selection(confirm, "Yes - Format device"))
+        return;
+
+    if (ensure_path_unmounted(v->mount_point) != 0)
+        return;
+
+    switch (chosen_item) {
+        case 0:
+            ret = format_volume(v->mount_point);
+            break;
+        case 1:
+        case 2:
+            ret = format_device(v->blk_device, v->mount_point, list[chosen_item]);
+            break;
+    }
+
+    // refresh volume table fstype and recreate the /etc/fstab file for proper system mount command function
+    load_volume_table();
+    process_volumes();
+    if (ret)
+        LOGE("Could not format %s (%s)\n", volume, list[chosen_item]);
+    else
+        ui_print("Done formatting %s (%s)\n", volume, list[chosen_item]);
+}
+#endif
+
 int show_partition_menu() {
     static const char* headers[] = { "Mounts and Storage Menu", NULL };
 
@@ -1021,6 +1100,9 @@ int show_partition_menu() {
         }
     }
 
+#ifdef USE_F2FS
+    int enable_f2fs_ext4_conversion = 0;
+#endif
     for (;;) {
         for (i = 0; i < mountable_volumes; i++) {
             MountMenuEntry* e = &mount_menu[i];
@@ -1037,11 +1119,19 @@ int show_partition_menu() {
 
         if (!is_data_media()) {
             list[mountable_volumes + formatable_volumes] = "mount USB storage";
-            list[mountable_volumes + formatable_volumes + 1] = '\0';
+            list[mountable_volumes + formatable_volumes + 1] = NULL;
+#ifdef USE_F2FS
+            list[mountable_volumes + formatable_volumes + 1] = "toggle f2fs <-> ext4 migration";
+            list[mountable_volumes + formatable_volumes + 2] = NULL;
+#endif
         } else {
             list[mountable_volumes + formatable_volumes] = "format /data and /data/media (/sdcard)";
             list[mountable_volumes + formatable_volumes + 1] = "mount USB storage";
-            list[mountable_volumes + formatable_volumes + 2] = '\0';
+            list[mountable_volumes + formatable_volumes + 2] = NULL;
+#ifdef USE_F2FS
+            list[mountable_volumes + formatable_volumes + 2] = "toggle f2fs <-> ext4 migration";
+            list[mountable_volumes + formatable_volumes + 3] = NULL;
+#endif
         }
 
         chosen_item = get_menu_selection(headers, list, 0, 0);
@@ -1053,15 +1143,22 @@ int show_partition_menu() {
             } else {
                 if (!confirm_selection("format /data and /data/media (/sdcard)", confirm))
                     continue;
-                // sets int ignore_data_media = 1
-                // when ignore_data_media = 1, this will truly format /data as a partition (roots.c)
-                ignore_data_media_workaround(1);
-                ui_print("Formatting /data...\n");
-                if (0 != format_volume("/data"))
-                    ui_print("Error formatting /data!\n");
-                else
-                    ui_print("Done.\n");
-                ignore_data_media_workaround(0);
+                // sets is_data_media_preserved() to 0
+                // this will truly format /data as a partition (format_device() and format_volume())
+                preserve_data_media(0);
+#ifdef USE_F2FS
+                if (enable_f2fs_ext4_conversion) {
+                    format_ext4_or_f2fs("/data");
+                } else
+#endif
+                {
+                    ui_print("Formatting /data...\n");
+                    if (0 != format_volume("/data"))
+                        ui_print("Error formatting /data!\n");
+                    else
+                        ui_print("Done.\n");
+                }
+                preserve_data_media(1);
 
                 // recreate /data/media with proper permissions
                 ensure_path_mounted("/data");
@@ -1073,10 +1170,10 @@ int show_partition_menu() {
             MountMenuEntry* e = &mount_menu[chosen_item];
 
             if (is_path_mounted(e->path)) {
-                ignore_data_media_workaround(1);
+                preserve_data_media(0);
                 if (0 != ensure_path_unmounted(e->path))
                     ui_print("Error unmounting %s!\n", e->path);
-                ignore_data_media_workaround(0);
+                preserve_data_media(1);
             } else {
                 if (0 != ensure_path_mounted(e->path))
                     ui_print("Error mounting %s!\n", e->path);
@@ -1094,14 +1191,33 @@ int show_partition_menu() {
                 continue;
             }
 
-            if (!confirm_selection(confirm_string, confirm))
-                continue;
-            ui_print("Formatting %s...\n", e->path);
-            if (0 != format_volume(e->path))
-                ui_print("Error formatting %s!\n", e->path);
-            else
-                ui_print("Done.\n");
+#ifdef USE_F2FS
+            if (enable_f2fs_ext4_conversion && !(is_data_media() && strcmp(e->path, "/data") == 0)) {
+                if (strcmp(e->type, "ext4") == 0 || strcmp(e->type, "f2fs") == 0) {
+                    format_ext4_or_f2fs(e->path);
+                    continue;
+                } else {
+                    ui_print("unsupported file system (%s)\n", e->type);
+                }
+            } else
+#endif
+            {
+                if (!confirm_selection(confirm_string, confirm))
+                    continue;
+                ui_print("Formatting %s...\n", e->path);
+                if (0 != format_volume(e->path))
+                    ui_print("Error formatting %s!\n", e->path);
+                else
+                    ui_print("Done.\n");
+            }
         }
+#ifdef USE_F2FS
+        else if ((is_data_media() && chosen_item == (mountable_volumes + formatable_volumes + 2)) ||
+                    (!is_data_media() && chosen_item == (mountable_volumes + formatable_volumes + 1))) {
+            enable_f2fs_ext4_conversion ^= 1;
+            ui_print("ext4 <-> f2fs conversion %s\n", enable_f2fs_ext4_conversion ? "enabled" : "disabled");
+        }
+#endif
     }
 
     free(mount_menu);
@@ -1408,14 +1524,19 @@ void format_sdcard(const char* volume) {
 
     const char* headers[] = { "Format device:", volume, "", NULL };
 
-    static char* list[] = { "default",
-                            "vfat",
-                            "exfat",
-                            "ntfs",
-                            "ext4",
-                            "ext3",
-                            "ext2",
-                            NULL };
+    static char* list[] = {
+        "default",
+        "ext2",
+        "ext3",
+        "ext4",
+        "vfat",
+        "exfat",
+        "ntfs",
+#ifdef USE_F2FS
+        "f2fs",
+#endif
+        NULL
+    };
 
     int ret = -1;
     char cmd[PATH_MAX];
@@ -1429,13 +1550,20 @@ void format_sdcard(const char* volume) {
         return;
 
     switch (chosen_item) {
-        case 0:
+        case 0: {
             ret = format_volume(v->mount_point);
             break;
+        }
         case 1:
-        case 2:
-        case 3:
-        case 4: {
+        case 2: {
+            // workaround for new vold managed volumes that cannot be recognized by pre-built ext2/ext3 bins
+            const char *device = v->blk_device2;
+            if (device == NULL)
+                device = v->blk_device;
+            ret = format_unknown_device(device, v->mount_point, list[chosen_item]);
+            break;
+        }
+        default: {
             if (fs_mgr_is_voldmanaged(v)) {
                 ret = vold_custom_format_volume(v->mount_point, list[chosen_item], 1) == CommandOkay ? 0 : -1;
             } else if (strcmp(list[chosen_item], "vfat") == 0) {
@@ -1457,15 +1585,12 @@ void format_sdcard(const char* volume) {
                     freecon(secontext);
                 }
             }
-            break;
-        }
-        case 5:
-        case 6: {
-            // workaround for new vold managed volumes that cannot be recognized by prebuilt ext2/ext3 bins
-            const char *device = v->blk_device2;
-            if (device == NULL)
-                device = v->blk_device;
-            ret = format_unknown_device(device, v->mount_point, list[chosen_item]);
+#ifdef USE_F2FS
+            else if (strcmp(list[chosen_item], "f2fs") == 0) {
+                char* args[] = { "mkfs.f2fs", v->blk_device };
+                ret = make_f2fs_main(2, args);
+            }
+#endif
             break;
         }
     }
@@ -1727,7 +1852,7 @@ int show_advanced_menu() {
                 break;
             }
             case 1:
-                handle_failure(1);
+                handle_failure();
                 break;
             case 2: {
                 ui_print("Outputting key codes.\n");
@@ -1810,7 +1935,12 @@ void write_fstab_root(char *path, FILE *file) {
     fprintf(file, "%s ", device);
     fprintf(file, "%s ", path);
     // special case rfs cause auto will mount it as vfat on samsung.
-    fprintf(file, "%s rw\n", vol->fs_type2 != NULL && strcmp(vol->fs_type, "rfs") != 0 ? "auto" : vol->fs_type);
+    // use real fstype if it is an f2fs/ext4 conversion
+    char* fstype = vol->fs_type;
+    if (vol->fs_type2 != NULL && strcmp(vol->fs_type, "rfs") != 0 && strcmp(vol->fs_type, "f2fs") != 0 && strcmp(vol->fs_type2, "f2fs") != 0) {
+        fstype = "auto";
+    }
+    fprintf(file, "%s rw\n", fstype);
 }
 
 void create_fstab() {
@@ -1879,59 +2009,21 @@ void process_volumes() {
 
         if (count != 0) {
             count = 5;
-            ignore_data_media_workaround(1);
+            preserve_data_media(0);
             while (count > 0 && ensure_path_unmounted("/data") != 0) {
                 usleep(500000);
                 count--;
             }
-            ignore_data_media_workaround(0);
+            preserve_data_media(1);
             if (count == 0)
                 LOGE("could not unmount /data after /data/media setup\n");
         }
     }
 
     return;
-
-    // dead code.
-    if (device_flash_type() != BML)
-        return;
-
-    ui_print("Checking for ext4 partitions...\n");
-    int ret = 0;
-    ret = bml_check_volume("/system");
-    ret |= bml_check_volume("/data");
-    if (has_datadata())
-        ret |= bml_check_volume("/datadata");
-    ret |= bml_check_volume("/cache");
-
-    if (ret == 0) {
-        ui_print("Done!\n");
-        return;
-    }
-
-    char backup_path[PATH_MAX];
-    time_t t = time(NULL);
-    char backup_name[PATH_MAX];
-    struct timeval tp;
-    gettimeofday(&tp, NULL);
-    sprintf(backup_name, "before-ext4-convert-%ld", tp.tv_sec);
-    sprintf(backup_path, "%s/clockworkmod/backup/%s", get_primary_storage_path(), backup_name);
-
-    ui_set_show_text(1);
-    ui_print("Filesystems need to be converted to ext4.\n");
-    ui_print("A backup and restore will now take place.\n");
-    ui_print("If anything goes wrong, your backup will be\n");
-    ui_print("named %s. Try restoring it\n", backup_name);
-    ui_print("in case of error.\n");
-
-    nandroid_backup(backup_path);
-    nandroid_restore(backup_path, 1, 1, 1, 1, 1, 0);
-    ui_set_show_text(0);
 }
 
-void handle_failure(int ret) {
-    if (ret == 0)
-        return;
+void handle_failure() {
     if (0 != ensure_path_mounted(get_primary_storage_path()))
         return;
     mkdir("/sdcard/clockworkmod", S_IRWXU | S_IRWXG | S_IRWXO);
@@ -1987,7 +2079,7 @@ int verify_root_and_recovery() {
         // check install-recovery.sh exists and is executable
         if (0 == lstat("/system/etc/install-recovery.sh", &st)) {
             if (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) {
-                ui_show_text(1);
+                ui_SetShowText(true);
                 if (confirm_selection("ROM may flash stock recovery on boot. Fix?", "Yes - Disable recovery flash")) {
                     __system("chmod -x /system/etc/install-recovery.sh");
                     ret = 1;
@@ -2014,7 +2106,7 @@ int verify_root_and_recovery() {
         if (S_ISREG(st.st_mode)) {
             su_nums += 1;
             if (needs_suid && (st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
-                ui_show_text(1);
+                ui_SetShowText(true);
                 if (confirm_selection("Root access possibly lost. Fix?", "Yes - Fix root (/system/bin/su)")) {
                     __system("chmod 6755 /system/bin/su");
                     ret = 1;
@@ -2028,7 +2120,7 @@ int verify_root_and_recovery() {
         if (S_ISREG(st.st_mode)) {
             su_nums += 1;
             if (needs_suid && (st.st_mode & (S_ISUID | S_ISGID)) != (S_ISUID | S_ISGID)) {
-                ui_show_text(1);
+                ui_SetShowText(true);
                 if (confirm_selection("Root access possibly lost. Fix?", "Yes - Fix root (/system/xbin/su)")) {
                     __system("chmod 6755 /system/xbin/su");
                     ret = 1;
@@ -2039,7 +2131,7 @@ int verify_root_and_recovery() {
 
     // If we have no root (exists == 0) or we have two su instances (exists == 2), prompt to properly root the device
     if (!exists || su_nums != 1) {
-        ui_show_text(1);
+        ui_SetShowText(true);
         if (confirm_selection("Root access is missing/broken. Root device?", "Yes - Apply root (/system/xbin/su)")) {
             __system("/sbin/install-su.sh");
             ret = 2;

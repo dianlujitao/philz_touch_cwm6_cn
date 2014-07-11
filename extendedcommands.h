@@ -1,8 +1,14 @@
+#ifndef __EXTENDEDCOMMANDS_H
+#define __EXTENDEDCOMMANDS_H
+
 void
 toggle_signature_check();
 
 void
 show_choose_zip_menu();
+
+void
+set_gather_hidden_files(int enable);
 
 char**
 gather_files(const char* basedir, const char* fileExtensionOrDirectory, int* numFiles);
@@ -45,6 +51,7 @@ show_advanced_menu();
 
 int format_device(const char *device, const char *path, const char *fs_type);
 
+// support format MTD, MMC, BML, ext2, ext3 and directory rm -rf like if a path is passed
 int format_unknown_device(const char *device, const char* path, const char *fs_type);
 
 void format_sdcard(const char* volume);
@@ -55,7 +62,7 @@ void create_fstab();
 
 int has_datadata();
 
-void handle_failure(int ret);
+void handle_failure();
 
 void process_volumes();
 
@@ -79,7 +86,15 @@ int volume_main(int argc, char **argv);
 
 void show_advanced_power_menu();
 
+#ifdef USE_F2FS
+extern int make_f2fs_main(int argc, char **argv);
+extern int fsck_f2fs_main(int argc, char **argv);
+extern int fibmap_main(int argc, char **argv);
+#endif
+
 #ifdef RECOVERY_EXTEND_NANDROID_MENU
 void extend_nandroid_menu(char** items, int item_count, int max_items);
 void handle_nandroid_menu(int item_count, int selected);
 #endif
+
+#endif  // __EXTENDEDCOMMANDS_H

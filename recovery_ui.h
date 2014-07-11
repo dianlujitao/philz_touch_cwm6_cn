@@ -138,7 +138,16 @@ set_sdcard_update_bootloader_message();
 
 extern int ui_handle_key(int key, int visible);
 
+int ui_is_initialized();
+
+void ui_set_nandroid_print(int enable, int num);
+
+int ui_get_background_icon();
+
 // call a clean reboot
 void reboot_main_system(int cmd, int flags, char *arg);
+
+// Show a stage indicator.
+void ui_SetStage(int current, int max);
 
 #endif

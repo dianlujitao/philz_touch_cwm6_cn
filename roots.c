@@ -21,6 +21,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <dirent.h>
 
 #include "mtdutils/mtdutils.h"
 #include "mounts.h"
@@ -36,10 +37,116 @@
 #include "advanced_functions.h"
 
 #include "voldclient/voldclient.h"
+#include "libcrecovery/common.h" // __popen / __pclose
 
 static struct fstab *fstab = NULL;
 
-/* Support additional extra.fstab entries and add device2
+extern struct selabel_handle *sehandle;
+
+/*
+ get actual fstype from device (modified code from @kumajaya)
+ device argument is the v->blk_device
+ blkid output exp:  /dev/block/mmcblk1p1: UUID="3461-3337" TYPE="exfat"
+*/
+char* get_real_fstype(const char* device) {
+    char cmd[PATH_MAX];
+    char line[1024];
+    static char fstype[128];
+    char* real_device_fstype = NULL;
+
+    sprintf(cmd, "/sbin/blkid -c /dev/null %s", device);
+    FILE *fp = __popen(cmd, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "Unable to execute blkid.\n");
+        return NULL;
+    }
+
+    if (fgets(line, sizeof(line), fp) != NULL) {
+        char* ptr = strstr(line, "TYPE=");
+        if (ptr != NULL && sscanf(ptr + 5, "\"%127[^\"]\"", fstype) == 1)
+            real_device_fstype = fstype;
+    }
+    __pclose(fp);
+    if (real_device_fstype == NULL)
+        fprintf(stderr, "blkid: unknown filesystem on '%s'\n", device);
+
+    return real_device_fstype;
+}
+
+/* 
+system/core/fs_mgr/include/fs_mgr.h
+struct fstab {
+    int num_entries;
+    struct fstab_rec *recs;
+    char *fstab_filename;
+};
+
+struct fstab_rec {
+    char *blk_device;
+    char *mount_point;
+    char *fs_type;
+    unsigned long flags;
+    char *fs_options;
+    int fs_mgr_flags;
+    char *key_loc;
+    char *verity_loc;
+    long long length;
+    char *label;
+    int partnum;
+    int swap_prio;
+    unsigned int zram_size;
+
+    // cwm
+    char *blk_device2;
+    char *fs_type2;
+    char *fs_options2;
+
+    char *lun;
+};
+
+*******
+
+system/core/fs_mgr/fs_mgr.c
+
+static struct flag_list mount_flags[] = {
+    { "noatime",    MS_NOATIME },
+    { "noexec",     MS_NOEXEC },
+    { "nosuid",     MS_NOSUID },
+    { "nodev",      MS_NODEV },
+    { "nodiratime", MS_NODIRATIME },
+    { "ro",         MS_RDONLY },
+    { "rw",         0 },
+    { "remount",    MS_REMOUNT },
+    { "bind",       MS_BIND },
+    { "rec",        MS_REC },
+    { "unbindable", MS_UNBINDABLE },
+    { "private",    MS_PRIVATE },
+    { "slave",      MS_SLAVE },
+    { "shared",     MS_SHARED },
+    { "sync",       MS_SYNCHRONOUS },
+    { "defaults",   0 },
+    { 0,            0 },
+};
+
+static struct flag_list fs_mgr_flags[] = {
+    { "wait",        MF_WAIT },
+    { "check",       MF_CHECK },
+    { "encryptable=",MF_CRYPT },
+    { "nonremovable",MF_NONREMOVABLE },
+    { "voldmanaged=",MF_VOLDMANAGED},
+    { "length=",     MF_LENGTH },
+    { "recoveryonly",MF_RECOVERYONLY },
+    { "swapprio=",   MF_SWAPPRIO },
+    { "zramsize=",   MF_ZRAMSIZE },
+    { "verify",      MF_VERIFY },
+    { "noemulatedsd", MF_NOEMULATEDSD },
+    { "defaults",    0 },
+    { 0,             0 },
+};
+
+****
+
+Support additional extra.fstab entries and add device2
 * Needed until fs_mgr_read_fstab() starts to parse a blk_device2 entries
 * extra.fstab sample:
 ----> start extra.fstab
@@ -93,14 +200,15 @@ static void add_extra_fstab_entries(int num) {
 
 static void load_volume_table_extra() {
     int i;
-
+    fs_mgr_free_fstab(fstab_extra);
     fstab_extra = fs_mgr_read_fstab("/etc/extra.fstab");
     if (!fstab_extra) {
         fprintf(stderr, "No /etc/extra.fstab\n");
         return;
     }
 
-    fprintf(stderr, "extra filesystem table (device2, fstype2, options2):\n");
+    fprintf(stderr, "\nextra filesystem table: (device2, fstype2, options2):\n");
+    fprintf(stderr,   "======================\n");
     for(i = 0; i < fstab_extra->num_entries; ++i) {
         Volume* v = &fstab_extra->recs[i];
         add_extra_fstab_entries(i);
@@ -127,6 +235,7 @@ void load_volume_table() {
     int i;
     int ret;
 
+    fs_mgr_free_fstab(fstab);
     fstab = fs_mgr_read_fstab("/etc/recovery.fstab");
     if (!fstab) {
         LOGE("failed to read /etc/recovery.fstab\n");
@@ -141,9 +250,10 @@ void load_volume_table() {
         return;
     }
 
-    // Process vold-managed volumes with mount point "auto"
     for (i = 0; i < fstab->num_entries; ++i) {
         Volume* v = &fstab->recs[i];
+
+        // Process vold-managed volumes with mount point "auto"
         if (fs_mgr_is_voldmanaged(v) && strcmp(v->mount_point, "auto") == 0) {
             char mount[PATH_MAX];
 
@@ -155,6 +265,61 @@ void load_volume_table() {
     }
 
     load_volume_table_extra();
+
+#ifdef USE_F2FS
+    // allow switching between f2fs/ext4 depending on actual real format
+    // if fstab entry matches the real device fs_type, do nothing
+    // also skip vold managed devices as vold relies on the defined flags. These should be set to auto fstype for free formatting
+    for (i = 0; i < fstab->num_entries; ++i) {
+        Volume* v = &fstab->recs[i];
+
+        if (strcmp(v->fs_type, "ext4") == 0 || strcmp(v->fs_type, "f2fs") == 0) {
+            char* real_fstype = get_real_fstype(v->blk_device);
+            if (real_fstype == NULL || strcmp(real_fstype, v->fs_type) == 0 || fs_mgr_is_voldmanaged(v))
+                continue;
+
+            if (strcmp(real_fstype, "ext4") == 0 || strcmp(real_fstype, "f2fs") == 0) {
+                char *fstab_fstype;
+                char *fstab_options = NULL;
+                if (v->fs_type2 != NULL && v->fs_options2 != NULL && strcmp(real_fstype, v->fs_type2) == 0) {
+                    // try to use existing fs_options2 if possible
+                    fstab_fstype = strdup(v->fs_type);
+                    free(v->fs_type);
+                    v->fs_type = strdup(v->fs_type2);
+                    free(v->fs_type2);
+                    v->fs_type2 = strdup(fstab_fstype);
+                    if (v->fs_options != NULL) {
+                        fstab_options = strdup(v->fs_options);
+                        free(v->fs_options);
+                    }
+                    v->fs_options = strdup(v->fs_options2);
+                    free(v->fs_options2);
+                    if (fstab_options != NULL) {
+                        v->fs_options2 = strdup(fstab_options);
+                        free(fstab_options);
+                    }
+                } else {
+                    // no fs_options2: drop to bare minimal default fs_options
+                    fstab_fstype = strdup(v->fs_type);
+                    free(v->fs_type);
+                    v->fs_type = strdup(real_fstype);
+
+                    if (v->fs_options != NULL)
+                        free(v->fs_options);
+
+                    if (strcmp(v->fs_type, "f2fs") == 0) {
+                        v->fs_options = strdup("rw,noatime,nodev,nodiratime,inline_xattr");
+                    } else {
+                        // ext4: default options will be set in try_mount()
+                        v->fs_options = NULL;
+                    }
+                }
+                fprintf(stderr, "%s: %s -> %s\n", v->mount_point, fstab_fstype, v->fs_type);
+                free(fstab_fstype);
+            }
+        }
+    }
+#endif
 
 #ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
     device_truedualboot_after_load_volume_table();
@@ -261,7 +426,10 @@ int try_mount(const char* device, const char* mount_point, const char* fs_type, 
 }
 
 /*
-- Check if user forces the use of /data/media/0 for internal storage
+- Since Android 4.2, internal storage is located in /data/media/0 (multi user compatibility)
+- When upgrading to android 4.2, /data/media content is "migrated" to /data/media/0
+- In recovery, we force use of /data/media instead of /data/media/0 for internal storage if /data/media/.cwm_force_data_media file is found
+- For devices with pre-4.2 android support, we can define BOARD_HAS_NO_MULTIUSER_SUPPORT flag to default to /data/media, unless /data/media/0 exists
 - If we call use_migrated_storage() directly, we need to ensure_path_mounted("/data") before
 - On recovery start, no need to mount /data before as use_migrated_storage() is called by setup_data_media()
   setup_data_media() is either called by ensure_path_mounted() which will mount /data or
@@ -269,8 +437,12 @@ int try_mount(const char* device, const char* mount_point, const char* fs_type, 
 */
 int use_migrated_storage() {
     struct stat s;
+#ifdef BOARD_HAS_NO_MULTIUSER_SUPPORT
     return lstat("/data/media/0", &s) == 0 &&
             lstat("/data/media/.cwm_force_data_media", &s) != 0;
+#else
+    return lstat("/data/media/.cwm_force_data_media", &s) != 0;
+#endif
 }
 
 int is_data_media() {
@@ -299,19 +471,23 @@ void setup_data_media() {
             break;
         }
     }
-    // support /data/media/0
-    char path[15];
-    if (use_migrated_storage())
-        sprintf(path, "/data/media/0");
-    else sprintf(path, "/data/media");
-
-    if (ui_should_log_stdout())
-        LOGI("using %s for %s\n", path, mount_point);
 
     // recreate /data/media with proper permissions
     rmdir(mount_point);
-    mkdir(path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+    mkdir("/data/media", S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+
+    // support /data/media/0 (Android 4.2+)
+    char* path = "/data/media";
+    if (use_migrated_storage()) {
+        path = "/data/media/0";
+        mkdir(path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+    }
     symlink(path, mount_point);
+/*
+    // debug
+    if (ui_should_log_stdout())
+        LOGI("using %s for %s\n", path, mount_point);
+*/
 }
 
 int is_data_media_volume_path(const char* path) {
@@ -345,7 +521,9 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
 #endif
 
     if (is_data_media_volume_path(path)) {
-        if (ui_should_log_stdout()) {
+        if (ui_should_log_stdout() && ui_is_initialized()) {
+            // ui_is_initialized() check to limit output logging during "adb shell nandroid" commands
+            // also, will limit logging when "mount /sdcard" from shell  on /data/media devices with BOARD_RECOVERY_HANDLES_MOUNT enabled
             LOGI("setting up /data/media(/0) for %s.\n", path);
         }
         int ret;
@@ -356,7 +534,9 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
     }
     Volume* v = volume_for_path(path);
     if (v == NULL) {
-        LOGE("unknown volume for path [%s]\n", path);
+        // silent failure for sd-ext
+        if (strncmp(path, "/sd-ext", 7) != 0)
+            LOGE("unknown volume for path [%s]\n", path);
         return -1;
     }
     if (strcmp(v->fs_type, "ramdisk") == 0) {
@@ -401,6 +581,9 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
         return mtd_mount_partition(partition, mount_point, v->fs_type, 0);
     } else if (strcmp(v->fs_type, "ext4") == 0 ||
                strcmp(v->fs_type, "ext3") == 0 ||
+#ifdef USE_F2FS
+               strcmp(v->fs_type, "f2fs") == 0 ||
+#endif
                strcmp(v->fs_type, "rfs") == 0 ||
                strcmp(v->fs_type, "vfat") == 0) {
         // LOGE("main pass: %s %s %s %s\n", v->blk_device, mount_point, v->fs_type, v->fs_type2); // debug
@@ -433,8 +616,6 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
     return -1;
 }
 
-static int ignore_data_media = 0;
-
 // not thread safe because of scan_mounted_volumes()
 int ensure_path_unmounted(const char* path) {
 #ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
@@ -446,7 +627,7 @@ int ensure_path_unmounted(const char* path) {
     if (is_data_media_volume_path(path)) {
         return ensure_path_unmounted("/data");
     }
-    if (strstr(path, "/data") == path && is_data_media() && !ignore_data_media) {
+    if (strstr(path, "/data") == path && is_data_media() && is_data_media_preserved()) {
         return 0;
     }
 
@@ -481,7 +662,46 @@ int ensure_path_unmounted(const char* path) {
     return unmount_mounted_volume(mv);
 }
 
-extern struct selabel_handle *sehandle;
+// recursively deletes path except 'except' path
+// this will preserve the /path dir and leave it empty
+int rmtree_except(const char* path, const char* except)
+{
+    char pathbuf[PATH_MAX];
+    int rc = 0;
+    DIR* dp = opendir(path);
+    if (dp == NULL) {
+        return -1;
+    }
+    struct dirent* de;
+    while ((de = readdir(dp)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+            continue;
+        if (except && !strcmp(de->d_name, except))
+            continue;
+        struct stat st;
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, de->d_name);
+        rc = lstat(pathbuf, &st);
+        if (rc != 0) {
+            LOGE("Failed to stat %s\n", pathbuf);
+            break;
+        }
+        if (S_ISDIR(st.st_mode)) {
+            rc = rmtree_except(pathbuf, NULL);
+            if (rc != 0)
+                break;
+            rc = rmdir(pathbuf);
+        }
+        else {
+            rc = unlink(pathbuf);
+        }
+        if (rc != 0) {
+            LOGI("Failed to remove %s: %s\n", pathbuf, strerror(errno));
+            break;
+        }
+    }
+    closedir(dp);
+    return rc;
+}
 
 int format_volume(const char* volume) {
 #ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
@@ -489,27 +709,20 @@ int format_volume(const char* volume) {
         return 0;
 #endif
 
+    // check if we're formatting primary_storage (/sdcard) on /data/media device
+    // in that case, issue a rm -rf like command
     if (is_data_media_volume_path(volume)) {
-        // format_unknown_device() with NULL as fstype will end to a rm -rf command issued on path /sdcard, that is /data/media folder
-        return format_unknown_device(NULL, volume, NULL);
-    }
-    // check to see if /data is being formatted, and if it is /data/media
-    // Note: the /sdcard check is redundant probably, just being safe.
-    // by default, ignore_data_media = 0, so we will go to format_unknown_device()
-    // format_unknown_device() with null fstype will rm -rf /data, excluding /data/media path
-    // if ignore_data_media_workaround(1) is called, ignore_data_media is set to 1
-    // in that case, we will not use format_unknown_device() but proceed to below with a true format command issued
-    if (strstr(volume, "/data") == volume && is_data_media() && !ignore_data_media) {
         return format_unknown_device(NULL, volume, NULL);
     }
 
     Volume* v = volume_for_path(volume);
+    // silent failure for non existing sd-ext (when we factory reset)
     if (v == NULL) {
-        // silent failure for sd-ext
         if (strcmp(volume, "/sd-ext") != 0)
-            LOGE("unknown volume '%s'\n", volume);
+            LOGE("unknown volume \"%s\"\n", volume);
         return -1;
     }
+
     // silent failure to format non existing sd-ext when defined in recovery.fstab
     if (strcmp(volume, "/sd-ext") == 0) {
         struct stat s;
@@ -519,31 +732,39 @@ int format_volume(const char* volume) {
         }
     }
 
-    // Only use vold format for exact matches otherwise /sdcard will be
-    // formatted instead of /storage/sdcard0/.android_secure
-    if (fs_mgr_is_voldmanaged(v) && strcmp(volume, v->mount_point) == 0) {
-        if (ensure_path_unmounted(volume) != 0) {
-            LOGE("format_volume failed to unmount %s", v->mount_point);
-        }
-        return vold_format_volume(v->mount_point, 1) == CommandOkay ? 0 : -1;
-    }
-
     if (strcmp(v->fs_type, "ramdisk") == 0) {
         // you can't format the ramdisk.
         LOGE("can't format_volume \"%s\"", volume);
         return -1;
     }
+
+    // if we're formatting a path, this will act like 'rm -rf volume'
     if (strcmp(v->mount_point, volume) != 0) {
-#if 0
-        LOGE("can't give path \"%s\" to format_volume\n", volume);
-        return -1;
-#endif
         return format_unknown_device(v->blk_device, volume, NULL);
+    }
+
+    // check to see if /data is being formatted, and if it is /data/media
+    // by default, is_data_media_preserved() == 1, so we will go to format_unknown_device()
+    // format_unknown_device() with null fstype will rm -rf /data, excluding /data/media path
+    // if preserve_data_media(0) is called, is_data_media_preserved() will return 0
+    // in that case, we will not use format_unknown_device() but proceed to below with a true format command issued
+    if (strcmp(volume, "/data") == 0 && is_data_media() && is_data_media_preserved()) {
+        return format_unknown_device(NULL, volume, NULL);
     }
 
     if (ensure_path_unmounted(volume) != 0) {
         LOGE("format_volume failed to unmount \"%s\"\n", v->mount_point);
         return -1;
+    }
+
+    // Only use vold format for exact matches otherwise /sdcard will be
+    // formatted instead of /storage/sdcard0/.android_secure
+    // this check is redundant as we excluded above the (volume != v->mount_point) case
+    if (fs_mgr_is_voldmanaged(v) && strcmp(volume, v->mount_point) == 0) {
+        if (ensure_path_unmounted(volume) != 0) {
+            LOGE("format_volume failed to unmount %s", v->mount_point);
+        }
+        return vold_format_volume(v->mount_point, 1) == CommandOkay ? 0 : -1;
     }
 
     if (strcmp(v->fs_type, "yaffs2") == 0 || strcmp(v->fs_type, "mtd") == 0) {
@@ -572,7 +793,7 @@ int format_volume(const char* volume) {
     if (strcmp(v->fs_type, "ext4") == 0) {
         int result = make_ext4fs(v->blk_device, v->length, volume, sehandle);
         if (result != 0) {
-            LOGE("format_volume: make_extf4fs failed on %s\n", v->blk_device);
+            LOGE("format_volume: make_ext4fs failed on %s\n", v->blk_device);
             return -1;
         }
         return 0;
@@ -580,9 +801,8 @@ int format_volume(const char* volume) {
 
 #ifdef USE_F2FS
     if (strcmp(v->fs_type, "f2fs") == 0) {
-        const char* args[] = { "mkfs.f2fs", v->blk_device };
-        int result = make_f2fs_main(2, (char**)args);
-        if (result != 0) {
+        char* args[] = { "mkfs.f2fs", v->blk_device };
+        if (make_f2fs_main(2, args) != 0) {
             LOGE("format_volume: mkfs.f2fs failed on %s\n", v->blk_device);
             return -1;
         }
@@ -590,15 +810,37 @@ int format_volume(const char* volume) {
     }
 #endif
 
-#if 0
-    LOGE("format_volume: fs_type \"%s\" unsupported\n", v->fs_type);
-    return -1;
-#endif
     return format_unknown_device(v->blk_device, volume, v->fs_type);
 }
 
-void ignore_data_media_workaround(int ignore) {
-  ignore_data_media = ignore;
+int setup_install_mounts() {
+    if (fstab == NULL) {
+        LOGE("can't set up install mounts: no fstab loaded\n");
+        return -1;
+    }
+
+    int i;
+    for (i = 0; i < fstab->num_entries; ++i) {
+        Volume* v = fstab->recs + i;
+
+        if (strcmp(v->mount_point, "/tmp") == 0 ||
+            strcmp(v->mount_point, "/cache") == 0) {
+            if (ensure_path_mounted(v->mount_point) != 0) return -1;
+
+        } else {
+            if (ensure_path_unmounted(v->mount_point) != 0) return -1;
+        }
+    }
+    return 0;
+}
+
+static int data_media_preserved_state = 1;
+void preserve_data_media(int val) {
+    data_media_preserved_state = val;
+}
+
+int is_data_media_preserved() {
+    return data_media_preserved_state;
 }
 
 void setup_legacy_storage_paths() {

@@ -41,8 +41,8 @@ extern int text_rows;
 extern int text_col;
 extern int text_row;
 extern int text_top;
-extern int show_text;
-extern int show_text_ever;
+extern bool show_text;
+extern bool show_text_ever;
 extern char menu[MENU_MAX_ROWS][MENU_MAX_COLS];
 extern int show_menu;
 extern int menu_top;
@@ -62,8 +62,6 @@ extern volatile char key_pressed[KEY_MAX + 1];
 void update_screen_locked(void);
 
 void draw_screen_locked(void);
-
-void update_screen_locked(void);
 
 #ifdef PHILZ_TOUCH_RECOVERY
 void draw_touch_menu();
