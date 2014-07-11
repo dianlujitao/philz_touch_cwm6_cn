@@ -23,8 +23,10 @@ ifeq ($(call is-vendor-board-platform,QCOM),true)
   LOCAL_C_INCLUDES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
 endif
 
+ifneq ($(TARGET_BOARD_PLATFORM),msm7x27a)
 ifeq ($(TARGET_USES_QCOM_BSP), true)
     LOCAL_CFLAGS += -DMSM_BSP
+endif
 endif
 endif
 
