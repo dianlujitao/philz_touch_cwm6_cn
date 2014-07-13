@@ -43,8 +43,8 @@
 
 #include <signal.h>
 #include <sys/wait.h>
+#include <libgen.h>
 
-#include "bootloader.h"
 #include "common.h"
 #include "cutils/properties.h"
 #include "install.h"
@@ -59,13 +59,8 @@
 #include "recovery_settings.h"
 #include "nandroid.h"
 #include "mounts.h"
-#include "flashutils/flashutils.h"
 #include "edify/expr.h"
-#include <libgen.h>
-#include "mtdutils/mtdutils.h"
-#include "bmlutils/bmlutils.h"
 #include "cutils/android_reboot.h"
-#include "mmcutils/mmcutils.h"
 #include "voldclient/voldclient.h"
 
 #include "adb_install.h"
@@ -661,13 +656,17 @@ char* readlink_device_blk(const char* Path)
     char buf[1024];
     ssize_t len = readlink(vol->blk_device, buf, sizeof(buf)-1);
     if (len == -1) {
-        LOGI("failed to get device mmcblk link '%s'\n", vol->blk_device);
+        // LOGI("failed to get device mmcblk link '%s'\n", vol->blk_device);
         return NULL;
     }
 
     buf[len] = '\0';
     mmcblk_from_link = strdup(buf);
-    LOGI("found device mmcblk link: '%s' -> '%s'\n", vol->blk_device, mmcblk_from_link);
+    if (mmcblk_from_link == NULL)
+        LOGE("readlink_device_blk: memory error\n");
+    else
+        LOGI("found device mmcblk link: '%s' -> '%s'\n", vol->blk_device, mmcblk_from_link);
+
     return mmcblk_from_link;
 }
 
@@ -764,7 +763,7 @@ int Find_Partition_Size(const char* Path) {
     if (fp != NULL) {
         // try to read blk_device link target for devices not using /dev/block/xxx in recovery.fstab
         char* mmcblk_from_link = readlink_device_blk(Path);
-        while (fgets(line, sizeof(line), fp) != NULL) {
+        while (ret && fgets(line, sizeof(line), fp) != NULL) {
             unsigned long major, minor, blocks;
             char device[512];
 
@@ -783,14 +782,14 @@ int Find_Partition_Size(const char* Path) {
                 Total_Size = blocks * 1024ULL;
                 ret = 0;
             } else if (mmcblk_from_link != NULL && strcmp(tmpdevice, mmcblk_from_link) == 0) {
-                // get size from blk_device symlink to /dev/block/xxx
-                free(mmcblk_from_link);
                 Total_Size = blocks * 1024ULL;
                 ret = 0;
             }
         }
 
         fclose(fp);
+        if (mmcblk_from_link != NULL)
+            free(mmcblk_from_link);
     }
 
     if (ret != 0)
