@@ -16,7 +16,7 @@ http://forum.xda-developers.com/showthread.php?t=2201860
     BOARD_USE_CUSTOM_RECOVERY_FONT := \"roboto_15x24.h\"
 此时编译将使用原版graphics.c，且recovery界面显示为英文。
 
-<br /><br />制作中参考使用了几位大神/团队提供的代码，特此感谢：
+<br />制作中参考使用了几位大神/团队提供的代码，特此感谢：
 <br />xiaolu : https://github.com/xiaolu/philz_touch_cwm6_cn
 <br />PhilZ-cwm6 : https://github.com/PhilZ-cwm6/philz_touch_cwm6
 <br />xuefy : https://code.csdn.net/ATX/cwm_bootable_recovery_cn
@@ -35,7 +35,7 @@ Check these two patches are present in your build/ directory
 
 Clone philz recovery to bootable/recovery-philz folder
 
-    git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery-philz -b cm-11.0
+    git clone https://github.com/dianlujitao/philz_touch_cwm6_cn bootable/recovery-philz -b cm-11.0
 
 Now build with RECOVERY_VARIANT flag set to philz.
 
