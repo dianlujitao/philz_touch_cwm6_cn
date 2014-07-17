@@ -35,9 +35,6 @@ int
 show_partition_menu();
 
 int
-install_zip(const char* packagefilepath);
-
-int
 __system(const char *command);
 
 int
@@ -61,7 +58,7 @@ void write_recovery_version();
 
 void free_string_array(char** array);
 
-static int is_path_mounted(const char* path);
+int is_path_mounted(const char* path);
 
 int volume_main(int argc, char **argv);
 
@@ -71,6 +68,10 @@ void show_advanced_power_menu();
 extern int make_f2fs_main(int argc, char **argv);
 extern int fsck_f2fs_main(int argc, char **argv);
 extern int fibmap_main(int argc, char **argv);
+#endif
+
+#ifdef ENABLE_LOKI
+int loki_support_enabled();
 #endif
 
 #ifdef RECOVERY_EXTEND_NANDROID_MENU

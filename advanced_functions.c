@@ -58,7 +58,6 @@
 #include "advanced_functions.h"
 #include "recovery_settings.h"
 #include "nandroid.h"
-#include "mounts.h"
 #include "edify/expr.h"
 #include "cutils/android_reboot.h"
 #include "voldclient/voldclient.h"
@@ -1505,7 +1504,7 @@ void show_multi_flash_menu() {
 #ifdef PHILZ_TOUCH_RECOVERY
                         force_wait = -1;
 #endif
-                        if (install_zip(files[i - 2]) != 0)
+                        if (install_zip(files[i - 2]) != INSTALL_SUCCESS)
                             break;
                     }
                 }
@@ -1808,32 +1807,14 @@ int run_ors_script(const char* ors_script) {
                     }
                     ensure_path_mounted("/sd-ext");
                     ensure_path_mounted("/cache");
-                    if (no_wipe_confirm) {
-                        //do not confirm before wipe for scripts started at boot
-                        __system("rm -r /data/dalvik-cache");
-                        __system("rm -r /cache/dalvik-cache");
-                        __system("rm -r /sd-ext/dalvik-cache");
+                    __system("rm -r /data/dalvik-cache");
+                    __system("rm -r /cache/dalvik-cache");
+                    __system("rm -r /sd-ext/dalvik-cache");
 #ifndef USE_CHINESE_FONT
-                        ui_print("Dalvik Cache wiped.\n");
+                    ui_print("Dalvik Cache wiped.\n");
 #else
-                        ui_print("Dalvik Cache已经被清除。\n");
+                    ui_print("Dalvik Cache已经被清除。\n");
 #endif
-                    } else {
-#ifndef USE_CHINESE_FONT
-                        if (confirm_selection( "Confirm wipe?", "Yes - Wipe Dalvik Cache")) {
-#else
-                        if (confirm_selection( "确认要清除？", "是 - 清除Dalvik Cache")) {
-#endif
-                            __system("rm -r /data/dalvik-cache");
-                            __system("rm -r /cache/dalvik-cache");
-                            __system("rm -r /sd-ext/dalvik-cache");
-#ifndef USE_CHINESE_FONT
-                            ui_print("Dalvik Cache wiped.\n");
-#else
-                            ui_print("Dalvik Cache已经被清除。\n");
-#endif
-                        }
-                    }
                     ensure_path_unmounted("/data");
 #ifndef USE_CHINESE_FONT
                     ui_print("-- Dalvik Cache Wipe Complete!\n");
@@ -2107,13 +2088,13 @@ static void choose_default_ors_menu(const char* volume_path) {
     }
 
 #ifndef USE_CHINESE_FONT
-    static const char* headers[] = {
+    const char* headers[] = {
         "Choose a script to run",
         "",
         NULL
     };
 #else
-    static const char* headers[] = {
+    const char* headers[] = {
         "选择一个脚本来运行",
         "",
         NULL
@@ -2161,9 +2142,9 @@ static void choose_custom_ors_menu(const char* volume_path) {
     }
 
 #ifndef USE_CHINESE_FONT
-    static const char* headers[] = {"Choose .ors script to run", NULL};
+    const char* headers[] = {"Choose .ors script to run", NULL};
 #else
-    static const char* headers[] = {"选择.ors脚本来运行", NULL};
+    const char* headers[] = {"选择.ors脚本来运行", NULL};
 #endif
 
     char* ors_file = choose_file_menu(volume_path, ".ors", headers);

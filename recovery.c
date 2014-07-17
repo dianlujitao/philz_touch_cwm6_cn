@@ -56,8 +56,6 @@ struct selabel_handle *sehandle;
 #include "libtouch_gui/gui_settings.h"
 #endif
 
-int no_wipe_confirm = 0; // 0 == script is not ors_boot_script, confirm on wipe
-
 static const struct option OPTIONS[] = {
   { "send_intent", required_argument, NULL, 's' },
   { "update_package", required_argument, NULL, 'u' },
@@ -248,7 +246,7 @@ get_args(int *argc, char ***argv) {
     set_bootloader_message(&boot);
 }
 
-void
+static void
 set_sdcard_update_bootloader_message() {
     struct bootloader_message boot;
     memset(&boot, 0, sizeof(boot));
@@ -667,7 +665,8 @@ static int compare_string(const void* a, const void* b) {
 
 // legacy unused: we use gather_files() and choose_file_menu()
 static int
-update_directory(const char* path, const char* unmount_when_done) {
+update_directory(const char* path, const char* unmount_when_done,
+                 int* wipe_cache) {
     ensure_path_mounted(path);
 
 #ifndef USE_CHINESE_FONT
@@ -765,7 +764,7 @@ update_directory(const char* path, const char* unmount_when_done) {
             strlcat(new_path, "/", PATH_MAX);
             strlcat(new_path, item, PATH_MAX);
             new_path[strlen(new_path)-1] = '\0';  // truncate the trailing '/'
-            result = update_directory(new_path, unmount_when_done);
+            result = update_directory(new_path, unmount_when_done, wipe_cache);
             if (result >= 0) break;
         } else {
             // selected a zip file:  attempt to install it, and return
@@ -782,7 +781,7 @@ update_directory(const char* path, const char* unmount_when_done) {
                 ensure_path_unmounted(unmount_when_done);
             }
             if (copy) {
-                result = install_package(copy);
+                result = install_package(copy, wipe_cache, TEMPORARY_INSTALL_FILE);
                 free(copy);
             } else {
                 result = INSTALL_ERROR;
@@ -800,6 +799,35 @@ update_directory(const char* path, const char* unmount_when_done) {
         ensure_path_unmounted(unmount_when_done);
     }
     return result;
+}
+
+int install_zip(const char* packagefilepath) {
+    ui_print("\n-- Installing: %s\n", packagefilepath);
+    set_sdcard_update_bootloader_message();
+
+    // will ensure_path_mounted(packagefilepath)
+    // will also set background icon to installing and indeterminate progress bar
+    int wipe_cache = 0;
+    int status = install_package(packagefilepath, &wipe_cache, TEMPORARY_INSTALL_FILE);
+    ui_reset_progress();
+    if (status != INSTALL_SUCCESS) {
+        copy_logs();
+        ui_set_background(BACKGROUND_ICON_ERROR);
+        LOGE("Installation aborted.\n");
+        return 1;
+    } else if (wipe_cache && erase_volume("/cache")) {
+        LOGE("Cache wipe (requested by package) failed.\n");
+    }
+
+#ifdef PHILZ_TOUCH_RECOVERY
+    if (show_background_icon.value)
+        ui_set_background(BACKGROUND_ICON_CLOCKWORK);
+    else
+#endif
+        ui_set_background(BACKGROUND_ICON_NONE);
+
+    ui_print("\nInstall from sdcard complete.\n");
+    return 0;
 }
 
 // remove static to be able to call it from ors menu
@@ -864,39 +892,34 @@ int enter_sideload_mode(int status) {
     static char* list[] = { "取消sideload", NULL };
 #endif
     int icon = ui_get_background_icon();
+    int wipe_cache = 0;
 
+    // we need show_text to show adb sideload cancel menu (get_menu_selection())
+    bool text_visible = ui_IsTextVisible();
+    ui_SetShowText(true);
     get_menu_selection(headers, list, 0, 0);
-    int ret = apply_from_adb();
+    ui_SetShowText(text_visible);
+    int ret = apply_from_adb(&wipe_cache, TEMPORARY_INSTALL_FILE);
 
     // if item < 0 (cancel), apply_from_adb() will return INSTALL_NONE with appropriate log message
     if (ret != INSTALL_NONE) {
         status = ret;
-#ifdef ENABLE_LOKI
-        if (status == INSTALL_SUCCESS && loki_support_enabled() > 0) {
-#ifndef USE_CHINESE_FONT
-            ui_print("Checking if loki-fying is needed\n");
-#else
-            ui_print("正在检查是否需要loki-fying\n");
-#endif
-            status = loki_check();
-        }
-#endif
         if (status != INSTALL_SUCCESS) {
             ui_set_background(BACKGROUND_ICON_ERROR);
 #ifndef USE_CHINESE_FONT
             ui_print("Installation aborted.\n");
-#else
-            ui_print("安装中止。\n");
-#endif
-        } else if (!ui_IsTextVisible()) {
-            return status;  // recovery start command: reboot if logs aren't visible
         } else {
-            ui_set_background(icon);
+            if (wipe_cache && erase_volume("/cache")) {
+                LOGE("Cache wipe (requested by package) failed.\n");
+            }
+            if (ui_IsTextVisible()) {
+                ui_set_background(icon);
 #ifndef USE_CHINESE_FONT
-            ui_print("\nInstall from ADB complete.\n");
+                ui_print("\nInstall from ADB complete.\n");
 #else
-            ui_print("\n从ADB安装完毕。\n");
+                ui_print("\n从ADB安装完毕。\n");
 #endif
+            }
         }
     }
     return status;
@@ -1287,7 +1310,12 @@ main(int argc, char **argv) {
     int status = INSTALL_SUCCESS;
 
     if (update_package != NULL) {
-        status = install_package(update_package);
+        status = install_package(update_package, &wipe_cache, TEMPORARY_INSTALL_FILE);
+        if (status == INSTALL_SUCCESS && wipe_cache) {
+            if (erase_volume("/cache")) {
+                LOGE("Cache wipe (requested by package) failed.\n");
+            }
+        }
         if (status != INSTALL_SUCCESS) {
 #ifndef USE_CHINESE_FONT
             ui_print("Installation aborted.\n");
@@ -1331,18 +1359,14 @@ main(int argc, char **argv) {
         if (status != INSTALL_SUCCESS) ui_print("Media清除失败。\n");
 #endif
     } else if (sideload) {
-        // we need show_text to show adb sideload cancel menu
-        bool text_visible = ui_IsTextVisible();
-        ui_SetShowText(true);
         status = enter_sideload_mode(status);
-        ui_SetShowText(text_visible);
     } else if (!just_exit) {
         // let's check recovery start up scripts (openrecoveryscript and ROM Manager extendedcommands)
         status = INSTALL_NONE; // No command specified, it is a normal recovery boot unless we find a boot script to run
 
         LOGI("Checking for extendedcommand & OpenRecoveryScript...\n");
 
-        // we need show_text to show boot scripts log and sideload menu in ors scripts
+        // we need show_text to show boot scripts log
         bool text_visible = ui_IsTextVisible();
         ui_SetShowText(true);
         if (0 == check_boot_script_file(EXTENDEDCOMMAND_SCRIPT)) {
@@ -1355,10 +1379,8 @@ main(int argc, char **argv) {
         if (0 == check_boot_script_file(ORS_BOOT_SCRIPT_FILE)) {
             LOGI("Running openrecoveryscript....\n");
             status = INSTALL_ERROR;
-            no_wipe_confirm = 1; // this is a script started at boot, do not confirm wipe operations
             if (0 == run_ors_boot_script())
                 status = INSTALL_SUCCESS;
-            no_wipe_confirm = 0; // script done, next ones cannot be bootscripts until we restart recovery
         }
 
         ui_SetShowText(text_visible);

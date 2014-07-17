@@ -52,11 +52,6 @@ void ui_printlogtail(int nb_lines);
 int ui_get_text_cols();
 void ui_setMenuTextColor(int r, int g, int b, int a);
 
-#ifdef ENABLE_LOKI
-int loki_support_enabled();
-int loki_check();
-#endif
-
 // Display some header text followed by a menu of items, which appears
 // at the top of the screen (in place of any scrolling ui_print()
 // output, if necessary).
@@ -157,5 +152,7 @@ FILE* fopen_path(const char *path, const char *mode);
 
 // for nandroid cmd actions on voldmanaged devices (recovery.c)
 void vold_init();
+
+int install_zip(const char* packagefilepath);
 
 #endif  // RECOVERY_COMMON_H

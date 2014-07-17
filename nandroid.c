@@ -38,7 +38,7 @@
 #include "advanced_functions.h"
 #include "recovery_settings.h"
 #include "nandroid.h"
-#include "mounts.h"
+#include "mtdutils/mounts.h"
 
 #ifdef PHILZ_TOUCH_RECOVERY
 #include "libtouch_gui/nandroid_gui.h"
@@ -431,8 +431,8 @@ void set_override_yaffs2_wrapper(int set) {
     override_yaffs2_wrapper = set;
 }
 
-static nandroid_backup_handler get_backup_handler(const char *backup_path) {
-    Volume *v = volume_for_path(backup_path);
+static nandroid_backup_handler get_backup_handler(const char *mount_point) {
+    Volume *v = volume_for_path(mount_point);
     if (v == NULL) {
 #ifndef USE_CHINESE_FONT
         ui_print("Unable to find volume.\n");
@@ -451,7 +451,7 @@ static nandroid_backup_handler get_backup_handler(const char *backup_path) {
         return NULL;
     }
 
-    if (strcmp(backup_path, "/data") == 0 && is_data_media()) {
+    if (strcmp(mount_point, "/data") == 0 && is_data_media()) {
         return default_backup_handler;
     }
 

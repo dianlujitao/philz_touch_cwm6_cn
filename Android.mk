@@ -47,7 +47,6 @@ LOCAL_SRC_FILES := \
     install.c \
     roots.c \
     ui.c \
-    mounts.c \
     extendedcommands.c \
     advanced_functions.c \
     digest/md5.c \
@@ -83,7 +82,7 @@ endif
 # This should be the same line as upstream to not break makerecoveries.sh
 RECOVERY_VERSION := $(RECOVERY_NAME) v6.0.5.0
 
-PHILZ_BUILD := 6.50.2
+PHILZ_BUILD := 6.50.6
 CWM_BASE_VERSION := $(shell echo $(RECOVERY_VERSION) | cut -d ' ' -f 3)
 LOCAL_CFLAGS += -DCWM_BASE_VERSION="$(CWM_BASE_VERSION)"
 

@@ -29,7 +29,7 @@
 #include "minui/minui.h"
 #include "minzip/SysUtil.h"
 #include "minzip/Zip.h"
-#include "mounts.h"
+#include "mtdutils/mounts.h"
 #include "mtdutils/mtdutils.h"
 #include "roots.h"
 #include "verifier.h"
@@ -42,6 +42,10 @@
 
 #include "propsrvc/legacy_property_service.h" // legacy update-binary compatibility
 
+#ifdef ENABLE_LOKI
+#include "loki/loki_recovery.h"
+#endif
+
 #define ASSUMED_UPDATE_BINARY_NAME  "META-INF/com/google/android/update-binary"
 #define PUBLIC_KEYS_FILE "/res/keys"
 
@@ -50,8 +54,6 @@ static const int VERIFICATION_PROGRESS_TIME = 60;
 static const float VERIFICATION_PROGRESS_FRACTION = 0.25;
 static const float DEFAULT_FILES_PROGRESS_FRACTION = 0.4;
 static const float DEFAULT_IMAGE_PROGRESS_FRACTION = 0.1;
-
-static const char *LAST_INSTALL_FILE = "/cache/recovery/last_install";
 
 // Use legacy property environment if old update-binary
 // https://github.com/CyanogenMod/android_bootable_recovery/commit/2371d9dcd5d44b6954f5981e90e409fbd3ac1b02
@@ -97,7 +99,7 @@ static int unset_legacy_props() {
 
 // If the package contains an update binary, extract it and run it.
 static int
-try_update_binary(const char *path, ZipArchive *zip) {
+try_update_binary(const char *path, ZipArchive *zip, int* wipe_cache) {
 #ifdef BOARD_NATIVE_DUALBOOT_SINGLEDATA
 	int rc;
 	if((rc=device_truedualboot_before_update(path, zip))!=0)
@@ -248,6 +250,8 @@ try_update_binary(const char *path, ZipArchive *zip) {
     }
     close(pipefd[1]);
 
+    *wipe_cache = 0;
+
     char buffer[1024];
     FILE* from_child = fdopen(pipefd[0], "r");
     while (fgets(buffer, sizeof(buffer), from_child) != NULL) {
@@ -274,6 +278,10 @@ try_update_binary(const char *path, ZipArchive *zip) {
                 ui_print("\n");
             }
             fflush(stdout);
+        } else if (strcmp(command, "wipe_cache") == 0) {
+            *wipe_cache = 1;
+        } else if (strcmp(command, "clear_display") == 0) {
+            // not needed in PhilZ Touch;
         } else {
             LOGE("unknown command [%s]\n", command);
         }
@@ -301,7 +309,7 @@ try_update_binary(const char *path, ZipArchive *zip) {
 }
 
 static int
-really_install_package(const char *path)
+really_install_package(const char *path, int* wipe_cache)
 {
     ui_set_background(BACKGROUND_ICON_INSTALLING);
 #ifndef USE_CHINESE_FONT
@@ -369,13 +377,13 @@ really_install_package(const char *path)
 #else
     ui_print("正在安装更新...\n");
 #endif
-    return try_update_binary(path, &zip);
+    return try_update_binary(path, &zip, wipe_cache);
 }
 
 int
-install_package(const char* path)
+install_package(const char* path, int* wipe_cache, const char* install_file)
 {
-    FILE* install_log = fopen_path(LAST_INSTALL_FILE, "w");
+    FILE* install_log = fopen_path(install_file, "w");
     if (install_log) {
         fputs(path, install_log);
         fputc('\n', install_log);
@@ -387,13 +395,22 @@ install_package(const char* path)
         LOGE("failed to set up expected mounts for install; aborting\n");
         result = INSTALL_ERROR;
     } else {
-        result = really_install_package(path);
+        result = really_install_package(path, wipe_cache);
     }
+
+#ifdef ENABLE_LOKI
+    if (result == INSTALL_SUCCESS && loki_support_enabled() > 0) {
+        ui_print("Checking if loki-fying is needed\n");
+        result = loki_check();
+    }
+#endif
+
     if (install_log) {
         fputc(result == INSTALL_SUCCESS ? '1' : '0', install_log);
         fputc('\n', install_log);
         fclose(install_log);
     }
+
     return result;
 }
 

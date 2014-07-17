@@ -37,7 +37,6 @@
 #include "advanced_functions.h"
 #include "recovery_settings.h"
 #include "nandroid.h"
-#include "mounts.h"
 #include "flashutils/flashutils.h"
 #include "edify/expr.h"
 #include <libgen.h>
@@ -141,7 +140,7 @@ struct CompilerFlagsUI libtouch_flags = {
  * Also, if no copy is found, always create it if there is a settings file
    we shouldn't always copy settings file on exit to avoid loosing user config after a wipe if he just change brightness by error for exp...
 
- Function is called when rebooting from recovery
+ Function is called when rebooting
  After success install of a new rom, before reboot, it will preserve settings if they were wiped by installed ROM
 */
 void verify_settings_file() {
@@ -154,6 +153,7 @@ void verify_settings_file() {
 
     // restore settings from the copy if needed (after a wipe)
     if (!file_found(PHILZ_SETTINGS_FILE) && file_found(settings_copy)) {
+        ui_SetShowText(true);
 #ifndef USE_CHINESE_FONT
         if (!auto_restore_settings.value && !confirm_selection("Restore recovery settings?", "Yes - Restore from sdcard"))
 #else

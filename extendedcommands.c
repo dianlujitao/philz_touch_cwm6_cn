@@ -38,7 +38,7 @@
 #include "advanced_functions.h"
 #include "recovery_settings.h"
 #include "nandroid.h"
-#include "mounts.h"
+#include "mtdutils/mounts.h"
 #include "edify/expr.h"
 
 
@@ -159,7 +159,7 @@ static void toggle_loki_support() {
     // ui_print("Loki Support: %s\n", apply_loki_patch.value ? "Enabled" : "Disabled");
 }
 
-// this is called when we load recovery settings
+// this is called when we load recovery settings and when we istall_package()
 // it is needed when after recovery is booted, user wipes /data, then he installs a ROM: we can still return the user setting 
 int loki_support_enabled() {
     char no_loki_variant[PROPERTY_VALUE_MAX];
@@ -181,57 +181,6 @@ int loki_support_enabled() {
     return ret;
 }
 #endif
-
-int install_zip(const char* packagefilepath) {
-#ifndef USE_CHINESE_FONT
-    ui_print("\n-- Installing: %s\n", packagefilepath);
-#else
-    ui_print("\n-- 正在安装：%s\n", packagefilepath);
-#endif
-    set_sdcard_update_bootloader_message();
-
-    // will ensure_path_mounted(packagefilepath)
-    // will also set background icon to installing and indeterminate progress bar
-    int status = install_package(packagefilepath);
-    ui_reset_progress();
-    if (status != INSTALL_SUCCESS) {
-        ui_set_background(BACKGROUND_ICON_ERROR);
-#ifndef USE_CHINESE_FONT
-        ui_print("Installation aborted.\n");
-#else
-        ui_print("安装中止。\n");
-#endif
-        return 1;
-    }
-#ifdef ENABLE_LOKI
-    if (loki_support_enabled() > 0) {
-#ifndef USE_CHINESE_FONT
-        ui_print("Checking if loki-fying is needed\n");
-#else
-        ui_print("检查是否需要loki-fying\n");
-#endif
-        status = loki_check();
-        if (status != INSTALL_SUCCESS) {
-            ui_set_background(BACKGROUND_ICON_ERROR);
-            return 1;
-        }
-    }
-#endif
-
-#ifdef PHILZ_TOUCH_RECOVERY
-    if (show_background_icon.value)
-        ui_set_background(BACKGROUND_ICON_CLOCKWORK);
-    else
-#endif
-        ui_set_background(BACKGROUND_ICON_NONE);
-
-#ifndef USE_CHINESE_FONT
-    ui_print("\nInstall from sdcard complete.\n");
-#else
-    ui_print("\n从SD卡安装结束。\n");
-#endif
-    return 0;
-}
 
 // top fixed menu items, those before extra storage volumes
 #define FIXED_TOP_INSTALL_ZIP_MENUS 1
@@ -2132,7 +2081,7 @@ void handle_failure() {
 #endif
 }
 
-static int is_path_mounted(const char* path) {
+int is_path_mounted(const char* path) {
     Volume* v = volume_for_path(path);
     if (v == NULL) {
         return 0;
