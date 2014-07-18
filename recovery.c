@@ -908,6 +908,9 @@ int enter_sideload_mode(int status) {
             ui_set_background(BACKGROUND_ICON_ERROR);
 #ifndef USE_CHINESE_FONT
             ui_print("Installation aborted.\n");
+#else
+            ui_print("安装中止。\n");
+#endif
         } else {
             if (wipe_cache && erase_volume("/cache")) {
                 LOGE("Cache wipe (requested by package) failed.\n");
